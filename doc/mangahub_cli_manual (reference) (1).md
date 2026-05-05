@@ -887,62 +887,45 @@ mangahub server start --udp-only
 Starting MangaHub Server Components...
 
 [1/5] HTTP API Server
-
-
 ✓ `Starting on http://localhost:8080`
 ✓ `Database connection established`
 ✓ `JWT middleware loaded`
 ✓ `12 routes registered`
-
 Status: Running
 
 [2/5] TCP Sync Server
-
-
 ✓ `Starting on tcp://localhost:9090`
 ✓ `Connection pool initialized (max: 100)`
 ✓ `Broadcast channels ready`
-
 Status: Listening for connections
 
 [3/5] UDP Notification Server
-
-
 ✓ `Starting on udp://localhost:9091`
 ✓ `Client registry initialized`
 ✓ `Notification queue ready`
-
 Status: Ready for broadcasts
 
 [4/5] gRPC Internal Service
-
-
 ✓ `Starting on grpc://localhost:9092`
 ✓ `3 services registered`
 ✓ `Protocol buffers loaded`
-
 Status: Serving
 
 [5/5] WebSocket Chat Server
-
-
 ✓ `Starting on ws://localhost:9093`
 ✓ `Chat rooms initialized`
 ✓ `User registry ready`
 
 Status: Ready for connections
 
-
-
-
- All servers started successfully!
+All servers started successfully!
 
 Server URLs:
-HTTP API:  http://localhost:8080
-TCP Sync:  tcp://localhost:9090
-UDP Notify: udp://localhost:9091
-gRPC:    grpc://localhost:9092
-WebSocket:  ws://localhost:9093
+  HTTP API:  http://localhost:8080
+  TCP Sync:  tcp://localhost:9090
+  UDP Notify: udp://localhost:9091
+  gRPC:    grpc://localhost:9092
+  WebSocket:  ws://localhost:9093
 
 Logs: tail -f ~/.mangahub/logs/server.log
 Stop: mangahub server stop
@@ -964,130 +947,81 @@ MangaHub Server Status
 
 ┌─────────────────────┬──────────┬─────────────────────┬────────────┬────────
 ────┐
-│ Service       │ Status  │ Address       │ Uptime   │ Load
+│ Service             │ Status   │ Address             │ Uptime     │ Load
 │
 ├─────────────────────┼──────────┼─────────────────────┼────────────┼────────
 ────┤
-
-
-`│ HTTP API      │` ✓ `Online │ localhost:8080   │ 2h 15m   │ 12`
-
+`│ HTTP API           │✓  Online │ localhost:8080      │ 2h 15m     │ 12`
 req/min │
-
-
-`│ TCP Sync      │` ✓ `Online │ localhost:9090   │ 2h 15m   │ 3`
-
+`│ TCP Sync           │✓  Online │ localhost:9090      │ 2h 15m     │ 3`
 clients │
-
-
-`│ UDP Notifications  │` ✓ `Online │ localhost:9091   │ 2h 15m   │ 8`
-
+`│ UDP Notifications  │✓  Online │ localhost:9091      │ 2h 15m     │ 8`
 clients │
-
-
-`│ gRPC Internal    │` ✓ `Online │ localhost:9092   │ 2h 15m   │ 5`
-
+`│ gRPC Internal      │✓  Online │ localhost:9092      │ 2h 15m     │ 5`
 req/min │
-
-
-`│ WebSocket Chat   │` ✓ `Online │ localhost:9093   │ 2h 15m   │ 12`
-
+`│ WebSocket Chat     │✓  Online │ localhost:9093      │ 2h 15m     │ 12`
 users  │
 └─────────────────────┴──────────┴─────────────────────┴────────────┴────────
 ────┘
 
-
-
 `Overall System Health:` ✓ `Healthy`
-
 
 Database:
 
+  `Connection:` ✓ `Active`
+  Size: 2.1 MB
+  Tables: 3 (users, manga, user_progress)
 
-`Connection:` ✓ `Active`
-
-Size: 2.1 MB
-Tables: 3 (users, manga, user_progress)
-
-
-
-
-Last backup: 2024-01-20 12:00:00
+  Last backup: 2024-01-20 12:00:00
 
 Memory Usage: 45.2 MB / 512 MB (8.8%)
 CPU Usage: 2.3% average
 Disk Space: 892 MB / 10 GB available
 
 ```
-
 **Error Status Output:**
-
 ```
 MangaHub Server Status
 
 ┌─────────────────────┬──────────┬─────────────────────┬────────────┬────────
 ────┐
-│ Service       │ Status  │ Address       │ Uptime   │ Load
+│ Service             │ Status   │ Address             │ Uptime     │ Load
 │
 ├─────────────────────┼──────────┼─────────────────────┼────────────┼────────
 ────┤
-
-
-`│ HTTP API      │` ✓ `Online │ localhost:8080   │ 45m    │ 8`
-
+`│ HTTP API           │✓  Online │ localhost:8080      │ 45m        │ 8`
 req/min │
-
-
-`│ TCP Sync      │` ✗ `Error │ localhost:9090   │ -     │ -`
-
+`│ TCP Sync           │✗ Error   │ localhost:9090      │ -          │ -`
 │
-
-
-`│ UDP Notifications  │` ⚠ `Warn  │ localhost:9091   │ 45m    │ 0`
-
+`│ UDP Notifications  │ ⚠ Warn   │ localhost:9091      │ 45m        │ 0`
 clients │
-
-
-`│ gRPC Internal    │` ✓ `Online │ localhost:9092   │ 45m    │ 2`
-
+`│ gRPC Internal      │✓  Online │ localhost:9092      │ 45m        │ 2`
 req/min │
-
-
-`│ WebSocket Chat   │` ✓ `Online │ localhost:9093   │ 45m    │ 5 users`
-
+`│ WebSocket Chat     │✓  Online │ localhost:9093      │ 45m        │ 5 users`
 │
 └─────────────────────┴──────────┴─────────────────────┴────────────┴────────
 ────┘
-
-```
-
 `Overall System Health:` ⚠ `Degraded`
 
-```
 Issues Detected:
-```
 
 ✗ `TCP Sync Server: Port 9090 already in use`
-```
 Solution: Kill process on port 9090 or change port in config
 
-```
-
 ⚠ `UDP Notifications: No clients registered`
-```
 This is normal if no users have subscribed to notifications
-
 Run 'mangahub server health' for detailed diagnostics
+```
 
 ### Stop Servers
-
+```
 # Stop all servers
 mangahub server stop
 
 # Stop specific server
 mangahub server stop --component http
-
 ```
+
 
 ### Server Status
 
@@ -1097,9 +1031,9 @@ mangahub server status
 
 # Detailed health check
 mangahub server health
-
+```
 ### Server Logs
-
+```
 # View server logs
 mangahub server logs
 
@@ -1108,27 +1042,27 @@ mangahub server logs --follow
 
 # Filter logs by level
 mangahub server logs --level error
-
+```
 ## Configuration
 ### View Configuration
-
+```
 # Show current configuration
 mangahub config show
 
 # Show specific section
 mangahub config show server
-
+```
 ### Update Configuration
-
+```
 # Set configuration value
 mangahub config set server.host "192.168.1.100"
 mangahub config set notifications.enabled false
 
 # Reset to defaults
 mangahub config reset
-
+```
 ### Profile Management
-
+```
 # Create new profile
 mangahub profile create --name work
 
@@ -1139,27 +1073,25 @@ mangahub profile switch --name work
 mangahub profile list
 
 ```
-
 ## Advanced Features
 ### Batch Operations
-
 ```
 # Batch add manga to library
 mangahub library batch-add --file manga-list.txt --status plan-to-read
 
 # Batch update progress
 mangahub progress batch-update --file progress-updates.csv
-
+```
 ### Backup and Restore
-
+```
 # Create backup
 mangahub backup create --output backup-2024.tar.gz
 
 # Restore from backup
 mangahub backup restore --input backup-2024.tar.gz
-
+```
 ### Database Operations
-
+```
 # Database integrity check
 mangahub db check
 
@@ -1168,10 +1100,9 @@ mangahub db optimize
 
 # Database statistics
 mangahub db stats
-
+```
 ## Troubleshooting
 ### Common Issues
-```
 
 _Authentication Problems_
 ```
@@ -1188,22 +1119,17 @@ mangahub auth register --username <username> --email <email>
 ```
 Clearing authentication data...
 
-```
-
 ✓ `Authentication token removed`
 ✓ `User session cleared`
 ✓ `Sync connections terminated`
 ✓ `Cache cleared`
 
-```
 You are now logged out. To continue using MangaHub:
 
-```
-
-```
 mangahub auth login --username <your-username>
-
+```
 Or register a new account:
+```
 mangahub auth register --username <username> --email <email>
 
 ```
@@ -1223,7 +1149,6 @@ mangahub sync reconnect
 ```
 Testing MangaHub server connectivity...
 
-```
 
 `HTTP API (localhost:8080):` ✓ `Online (15ms)`
 `└─ Authentication endpoint:` ✓ `Responding`
@@ -1248,7 +1173,7 @@ Testing MangaHub server connectivity...
 `└─ Echo test:` ✓ `Success`
 
 `Overall connectivity:` ✓ `All services reachable`
-```
+
 Network quality: Excellent
 
 ```
@@ -1258,39 +1183,27 @@ Network quality: Excellent
 ```
 Testing MangaHub server connectivity...
 
-```
 
 `HTTP API (localhost:8080):` ✗ `Timeout (>5000ms)`
-```
 └─ Error: Connection refused
 
-```
 
 `TCP Sync (localhost:9090):` ✗ `Failed`
-```
 └─ Error: No route to host
 
-```
 
 `UDP Notify (localhost:9091):` ⚠ `Partial (250ms)`
 `└─ Registration test:` ✗ `Timeout`
 `└─ Echo test:` ✓ `Success (slow)`
 
 `gRPC Service (localhost:9092):` ✗ `Failed`
-```
 └─ Error: Connection refused
-
-```
 
 `WebSocket Chat (localhost:9093):` ✗ `Failed`
-```
 └─ Error: Connection refused
-
-```
 
 `Overall connectivity:` ✗ `Major issues detected`
 
-```
 Troubleshooting suggestions:
 1. Check if servers are running: mangahub server status
 
@@ -1301,10 +1214,10 @@ Troubleshooting suggestions:
 4. Verify config file: mangahub config show server
 
 5. Check logs: mangahub server logs --level error
-
 ```
 
 _Database Issues_
+
 ```
 # Repair database
 mangahub db repair
@@ -1323,23 +1236,19 @@ Database: ~/.mangahub/data.db
 Size: 2.3 MB
 
 Checking tables...
-```
 
 `users table:` ✓ `15 records, no corruption`
 `manga table:` ✓ `42 records, no corruption`
 `user_progress table:` ⚠ `127 records, 3 orphaned entries found`
 
-```
 Repairing issues...
 
-```
 
 ✓ `Removed 3 orphaned progress entries`
 ✓ `Rebuilt indexes for performance`
 ✓ `Updated database statistics`
 ✓ `Compressed database (saved 0.3 MB)`
 
-```
 Database repair completed successfully!
 
 Summary:
@@ -1360,21 +1269,16 @@ Running database integrity check and repair...
 Database: ~/.mangahub/data.db
 Size: 2.3 MB
 
-```
-
 ✗ `Critical database corruption detected!`
 
-```
 Issues found:
 - users table: 5 corrupted records
 - manga table: Schema mismatch
 - user_progress table: Index corruption
 
-```
 
 ⚠ `Automatic repair failed. Manual intervention required.`
 
-```
 Recovery options:
 1. Restore from backup:
 mangahub backup restore --input backup-2024.tar.gz
@@ -1394,14 +1298,9 @@ _Connection Issues_
 # Test server connectivity
 mangahub server ping
 
-```
-
-```
 # Reset network connections
 mangahub sync reconnect
-
 ```
-
 _Database Issues_
 ```
 # Repair database
@@ -1409,17 +1308,17 @@ mangahub db repair
 
 # Reinitialize if needed
 mangahub init --force
-
+```
 ### Debug Mode
-
+```
 # Run with debug logging
 mangahub --verbose <command>
 
 # Enable trace logging
 mangahub config set logging.level trace
-
+```
 ### Log Analysis
-
+```
 # View error logs
 mangahub logs errors
 
@@ -1428,10 +1327,10 @@ mangahub logs search "connection failed"
 
 # Clear old logs
 mangahub logs clean --older-than 30d
-
+```
 ## Examples and Use Cases
 ### Daily Usage Workflow
-
+```
 # Morning routine
 mangahub server start &
 mangahub sync connect
@@ -1445,23 +1344,20 @@ mangahub progress update --manga-id current-read --chapter 42
 
 # Join community chat
 mangahub chat join
-
+```
 ### Bulk Library Management
-
+```
 # Export current library for backup
 mangahub export library --format json --output backup.json
 
-```
-
-```
 # Import manga from another service
 mangahub import --format mal --input myanimelist-export.xml
 
 # Bulk status update
 mangahub library batch-update --status completed --file completed-manga.txt
-
+```
 ### Server Administration
-
+```
 # Start production server
 mangahub server start --config production.yaml --daemon
 
@@ -1470,12 +1366,9 @@ mangahub server health --continuous
 
 # Rotate logs
 mangahub logs rotate
-
+```
 ## API Integration
 ### Custom Scripts
-
-```
-
 The CLI can be used in shell scripts:
 
 ```
@@ -1485,36 +1378,29 @@ The CLI can be used in shell scripts:
 while IFS=',' read -r manga_id chapter ; do
 mangahub progress update --manga-id "$manga_id" --chapter "$chapter"
 done < progress-updates.csv
-
-### JSON Output
-
 ```
-
+### JSON Output
 Most commands support JSON output for programmatic use:
-
 ```
 # Get library as JSON
 mangahub library list --output json
 
 # Search results as JSON
 mangahub manga search "keyword" --output json | jq '.results[].title'
-
+```
 ## Support and Updates
 ### Getting Help
-
+```
 # General help
 mangahub help
 
 # Command-specific help
 
-```
-
-```
 mangahub manga help
 mangahub library help
-
+```
 ### Version Information
-
+```
 # Check version
 mangahub version
 
@@ -1523,19 +1409,12 @@ mangahub update check
 
 # Update to latest version
 mangahub update install
-
-### Bug Reports
-
 ```
-
-To report issues: 1. Run command with `--verbose` flag
-
-
+### Bug Reports
+To report issues: 
+1. Run command with `--verbose` flag
 2. Check logs: `mangahub logs errors`
-
-
 3. Include system info: `mangahub system info`
-
 
 This manual covers all major functionality of the MangaHub CLI application. For additional
 features or specific use cases, refer to the built-in help system or consult the online

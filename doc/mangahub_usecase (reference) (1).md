@@ -1,251 +1,148 @@
 # MangaHub - Use Case Specification (Revised Scope)
 ## 1. Introduction
 ### 1.1 Purpose
-
 This document defines the functional requirements for MangaHub through detailed use
 case specifications. The scope has been adjusted for 12-week implementation by
 junior/senior level students with limited Go experience.
 
 ### 1.2 Scope
-
-
 MangaHub is a simplified manga tracking system demonstrating network programming
 concepts through practical implementation of TCP, UDP, HTTP, gRPC, and WebSocket
 protocols.
 
 ### 1.3 System Overview
-
-
 The system provides basic manga tracking, reading progress synchronization, and
 community features while maintaining realistic complexity for academic implementation.
+
 ## 2. Actor Definitions
 ### 2.1 Primary Actors
-
   - **Manga Reader** : End users who track manga reading progress
-
-
   - **Chat User** : Users participating in real-time discussions
-
-
   - **System Administrator** : Staff managing basic system operations
 
 ### 2.2 Secondary Actors
-
   - **TCP Client** : Applications connecting to sync server
-
-
   - **UDP Client** : Applications receiving notifications
-
-
   - **WebSocket Client** : Browser connections for real-time chat
-
-
   - **External APIs** : MangaDx API for additional manga data
-
 
 ## 3. Core Use Cases
 ### 3.1 User Management
 
 _UC-001: User Registration_
-
-
 **Primary Actor** : Manga Reader
 **Goal** : Create a new user account
 **Preconditions** : None
 **Postconditions** : User account is created
 
-
-**Main Success Scenario** : 1. User provides username, email, and password
-
-
+**Main Success Scenario** : 
+1. User provides username, email, and password
 2. System validates input format and uniqueness
-
-
 3. System hashes password using bcrypt
-
-
 4. System creates user record in SQLite database
-
-
 5. System returns success confirmation
 
-
-**Alternative Flows** : - A1: Username already exists - System returns error message
-
-
+**Alternative Flows** : 
+  - A1: Username already exists - System returns error message
   - A2: Invalid email format - System requests valid email
-
-
   - A3: Weak password - System displays password requirements
 
-
 _UC-002: User Authentication_
-
 
 **Primary Actor** : Manga Reader
 **Goal** : Login to access personalized features
 **Preconditions** : User has valid account
 **Postconditions** : User is authenticated with JWT token
 
-
-**Main Success Scenario** : 1. User provides username/email and password
-
-
+**Main Success Scenario** : 
+1. User provides username/email and password
 2. System validates credentials against database
-
-
 3. System generates JWT token with user information
-
-
 4. System returns token for subsequent requests
-
-
 5. User can access protected endpoints
 
-
-**Alternative Flows** : - A1: Invalid credentials - System returns authentication error
-
-
+**Alternative Flows** : 
+  - A1: Invalid credentials - System returns authentication error
   - A2: Account not found - System suggests registration
-
 
 ### 3.2 Manga Discovery and Management
 
 _UC-003: Search Manga_
-
-
 **Primary Actor** : Manga Reader
 **Goal** : Find manga series using search criteria
 **Preconditions** : System has manga database populated
 **Postconditions** : Relevant manga results are displayed
 
-
-**Main Success Scenario** : 1. User enters search query (title or author)
-
-
+**Main Success Scenario** : 
+1. User enters search query (title or author)
 2. System queries SQLite database using LIKE patterns
-
-
 3. System applies basic filters (genre, status) if provided
-
-
 4. System returns paginated results with basic information
-
-
 5. User can select manga for detailed view
 
-
-**Alternative Flows** : - A1: No results found - System displays “no results” message
-
-
+**Alternative Flows** : 
+  - A1: No results found - System displays “no results” message
   - A2: Database error - System logs error and returns generic message
 
 _UC-004: View Manga Details_
-
-
 **Primary Actor** : Manga Reader
 **Goal** : Access detailed information about specific manga
 **Preconditions** : Manga exists in database
 **Postconditions** : Complete manga information is displayed
 
-
-**Main Success Scenario** : 1. User selects manga from search results or direct URL
-
-
+**Main Success Scenario** : 
+1. User selects manga from search results or direct URL
 2. System retrieves manga details from database
-
-
 3. System displays title, author, genres, description, chapter count
-
-
 4. System shows user’s current progress if logged in
-
-
 5. User can add manga to library or update progress
 
-
 _UC-005: Add Manga to Library_
-
-
 **Primary Actor** : Manga Reader
 **Goal** : Add manga to personal reading library
 **Preconditions** : User is authenticated, manga exists
 **Postconditions** : Manga is added to user’s library
 
-
-**Main Success Scenario** : 1. User clicks “Add to Library” from manga details
-
-
+**Main Success Scenario** : 
+1. User clicks “Add to Library” from manga details
 2. System presents status options (Reading, Completed, Plan to Read)
-
-
 3. User selects initial status and current chapter
-
-
-4. System creates user_progress record in database
-
-
+4. System creates user progress record in database
 5. System confirms addition and updates UI
 
-
 **Alternative Flows** : - A1: Manga already in library - System offers to update status
-
-
   - A2: Database error - System logs error and shows retry option
 
 _UC-006: Update Reading Progress_
-
-
 **Primary Actor** : Manga Reader
 **Goal** : Track current reading progress
 **Preconditions** : Manga is in user’s library
 **Postconditions** : Progress is updated locally and broadcasted
 
-
-**Main Success Scenario** : 1. User updates current chapter number
-
-
+**Main Success Scenario** : 
+1. User updates current chapter number
 2. System validates chapter number against manga metadata
-
-
 3. System updates user_progress record with timestamp
-
-
 4. System triggers TCP broadcast to connected clients
-
-
 5. System confirms update to user
 
-
-**Alternative Flows** : - A1: Invalid chapter number - System shows validation error
-
-
+**Alternative Flows** : 
+  - A1: Invalid chapter number - System shows validation error
   - A2: TCP server unavailable - System updates locally, queues broadcast
+
 ### 3.3 Real-time Progress Synchronization
 
 _UC-007: Connect to TCP Sync Server_
-
-
 **Primary Actor** : TCP Client
 **Goal** : Establish connection for real-time progress updates
 **Preconditions** : TCP server is running
 **Postconditions** : Client is connected and registered
 
-
 **Main Success Scenario** : 1. Client initiates TCP connection to server
-
-
 2. Server accepts connection and creates goroutine handler
-
-
 3. Client sends authentication message with user credentials
-
-
 4. Server validates user and adds connection to active list
-
-
 5. Server confirms successful registration
-
 
 **Alternative Flows** : - A1: Authentication fails - Server closes connection
 
