@@ -1,0 +1,3750 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+cmd/api-server/main.go
+config.yaml
+data/manga_seed.json
+docs/mangahub_cli_manual (reference) (1).md
+docs/mangahub_project_spec (1).md
+docs/mangahub_usecase (reference) (1).md
+go.mod
+internal/auth/security.go
+internal/database/schema.sql
+pkg/database/seeder.go
+pkg/database/sqlite.go
+pkg/models/manga.go
+pkg/models/user.go
+README.md
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="internal/auth/security.go">
+package auth
+
+import (
+	"time"
+
+	"github.com/golang-jwt/jwt/v4"
+	"golang.org/x/crypto/bcrypt"
+)
+
+var jwtSecret = []byte("your_secret_key") // Trong thực tế nên để ở config[cite: 1]
+
+// HashPassword mã hóa mật khẩu trước khi lưu vào DB
+func HashPassword(password string) (string, error) {
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), 14)
+	return string(bytes), err
+}
+
+// CheckPasswordHash kiểm tra mật khẩu nhập vào với mã hash[cite: 3]
+func CheckPasswordHash(password, hash string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	return err == nil
+}
+
+// GenerateToken tạo JWT sau khi login thành công[cite: 3]
+func GenerateToken(userID string) (string, error) {
+	claims := jwt.MapClaims{
+		"user_id": userID,
+		"exp":     time.Now().Add(time.Hour * 24).Unix(), // Hết hạn sau 24h[cite: 1]
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(jwtSecret)
+}
+</file>
+
+<file path="pkg/models/user.go">
+package models
+
+import "time"
+
+type User struct {
+	ID           string    `json:"id"`
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"-"` // Không trả về password khi lấy dữ liệu
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type AuthRequest struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}
+
+type AuthResponse struct {
+	Token string `json:"token"`
+}
+</file>
+
+<file path="cmd/api-server/main.go">
+package main
+
+import (
+
+	// "database/sql"
+	// "log"
+
+	"mangahub/internal/auth"
+	"mangahub/pkg/database"
+	"mangahub/pkg/models"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid" // go get github.com/google/uuid
+)
+
+// func main() {
+//     // Khởi tạo DB (file sẽ được tạo trong thư mục data/)
+//     db := database.InitDB("./data/mangahub.db")
+//     defer db.Close()
+
+// 	// Nạp dữ liệu mẫu
+//     if err := database.SeedData(db); err != nil {
+//         log.Fatal("Không thể nạp dữ liệu mẫu:", err)
+//     }
+
+//     r := gin.Default()
+
+//     // Truyền biến 'db' vào các handler của bạn ở đây...
+
+//     r.Run(":8080") // Chạy HTTP API Server
+// }
+
+func main() {
+	db := database.InitDB("./data/mangahub.db")
+	defer db.Close()
+	database.SeedData(db)
+
+	r := gin.Default()
+
+	// --- CÁC ENDPOINT AUTHENTICATION ---
+
+	// UC-001: Đăng ký người dùng[cite: 3]
+	r.POST("/auth/register", func(c *gin.Context) {
+		var req models.AuthRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Dữ liệu không hợp lệ"})
+			return
+		}
+
+		hashedPwd, _ := auth.HashPassword(req.Password)
+		userID := uuid.New().String()
+
+		_, err := db.Exec("INSERT INTO users (id, username, password_hash) VALUES (?, ?, ?)",
+			userID, req.Username, hashedPwd)
+
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Username đã tồn tại"})
+			return
+		}
+
+		c.JSON(http.StatusCreated, gin.H{"message": "Đăng ký thành công", "user_id": userID})
+	})
+
+	// UC-002: Đăng nhập[cite: 3]
+	r.POST("/auth/login", func(c *gin.Context) {
+		var req models.AuthRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Thiếu thông tin"})
+			return
+		}
+
+		var userID, hashedPwd string
+		err := db.QueryRow("SELECT id, password_hash FROM users WHERE username = ?",
+			req.Username).Scan(&userID, &hashedPwd)
+
+		if err != nil || !auth.CheckPasswordHash(req.Password, hashedPwd) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Sai tài khoản hoặc mật khẩu"})
+			return
+		}
+
+		token, _ := auth.GenerateToken(userID)
+		c.JSON(http.StatusOK, models.AuthResponse{Token: token})
+	})
+
+	r.Run(":8080")
+}
+</file>
+
+<file path="config.yaml">
+server:
+  host: "localhost"
+  http_port: 8080
+  tcp_port: 9090
+  udp_port: 9091
+  grpc_port: 9092
+  websocket_port: 9093
+
+database:
+  path: "./data/mangahub.db"
+
+logging:
+  level: "info"
+  path: "./logs/"
+</file>
+
+<file path="data/manga_seed.json">
+[
+    {
+        "id": "one-piece",
+        "title": "One Piece",
+        "author": "Oda Eiichiro",
+        "genres": [
+            "Action",
+            "Adventure",
+            "Shounen"
+        ],
+        "status": "ongoing",
+        "total_chapters": 1100,
+        "description": "Monkey D. Luffy explores the Grand Line to become the Pirate King."
+    },
+    {
+        "id": "naruto",
+        "title": "Naruto",
+        "author": "Kishimoto Masashi",
+        "genres": [
+            "Action",
+            "Shounen"
+        ],
+        "status": "completed",
+        "total_chapters": 700,
+        "description": "A young ninja who seeks recognition from his peers."
+    }
+]
+</file>
+
+<file path="docs/mangahub_cli_manual (reference) (1).md">
+# MangaHub CLI Application - User Manual
+## Table of Contents
+
+1. Introduction
+
+
+2. Installation and Setup
+
+
+3. Getting Started
+
+
+4. Authentication Commands
+
+
+5. Manga Management
+
+
+6. Library Operations
+
+
+7. Network Protocol Features
+
+
+8. Chat System
+
+
+9. Configuration
+
+
+10. Troubleshooting
+
+
+11. Advanced Features
+
+## Introduction
+
+
+MangaHub CLI is a command-line interface for the MangaHub manga tracking system. It
+provides access to all core features including manga discovery, reading progress tracking,
+real-time synchronization, and community chat functionality.
+
+### System Requirements
+
+  - Go 1.19 or later
+
+
+  - SQLite 3.x
+
+
+  - Network connectivity for synchronization features
+
+
+  - Terminal with UTF-8 support
+
+### Supported Platforms
+
+  - Linux (x64, ARM)
+
+
+  - macOS (Intel, Apple Silicon)
+
+
+  - Windows (x64)
+
+
+## Installation and Setup
+### Download and Install
+
+```
+# Download the latest release
+wget https://github.com/yourorg/mangahub/releases/latest/mangahub-cli
+
+# Make executable (Linux/macOS)
+chmod +x mangahub-cli
+
+# Move to system path
+sudo mv mangahub-cli /usr/local/bin/mangahub
+
+# Verify installation
+mangahub version
+
+### First-Time Setup
+
+# Initialize configuration
+mangahub init
+
+# This creates:
+# ~/.mangahub/config.yaml
+# ~/.mangahub/data.db
+# ~/.mangahub/logs/
+```
+### Configuration File
+
+
+
+The default configuration is created at `~/.mangahub/config.yaml` :
+
+```
+server :
+ host : "localhost"
+ http_port : 8080
+ tcp_port : 9090
+ udp_port : 9091
+ grpc_port : 9092
+ websocket_port : 9093
+
+database :
+ path : "~/.mangahub/data.db"
+
+user :
+ username : ""
+ token : ""
+
+sync :
+ auto_sync : true
+ conflict_resolution : "last_write_wins"
+
+notifications :
+ enabled : true
+ sound : false
+
+logging :
+ level : "info"
+ path : "~/.mangahub/logs/"
+```
+
+## Getting Started
+### Quick Start Guide
+
+# 1. Start the MangaHub server
+mangahub server start
+
+# 2. In another terminal, register a new account
+mangahub auth register --username myuser --email myuser@example.com
+
+# 3. Login to get authentication token
+mangahub auth login --username myuser
+
+# 4. Search for manga
+mangahub manga search "one piece"
+
+# 5. Add manga to library
+mangahub library add --manga-id one-piece --status reading
+
+# 6. Update reading progress
+mangahub progress update --manga-id one-piece --chapter 1095
+
+### Command Structure
+
+All commands follow the pattern:
+
+```
+mangahub <command> <subcommand> [flags] [arguments]
+```
+### Global Flags
+
+
+  - `--config` : Specify config file path
+
+
+  - `--verbose` : Enable verbose output
+
+
+  - `--quiet` : Suppress non-error output
+
+
+  - `--help` : Show help information
+
+## Authentication Commands
+### Register New Account
+
+```
+mangahub auth register --username <username> --email <email>
+# Prompts for password securely
+
+```
+
+```
+# Example
+mangahub auth register --username johndoe --email john@example.com
+
+```
+
+**Expected Output:**
+
+```
+Password: [hidden input]
+Confirm password: [hidden input]
+
+✓ `Account created successfully!`
+User ID: usr_1a2b3c4d5e
+Username: johndoe
+Email: john@example.com
+Created: 2024-01-20 10:30:00 UTC
+
+Please login to start using MangaHub:
+mangahub auth login --username johndoe
+
+```
+
+**Error Cases:**
+
+```
+✗ `Registration failed: Username 'johndoe' already exists`
+Try: mangahub auth login --username johndoe
+
+```
+```
+✗ `Registration failed: Invalid email format`
+Please provide a valid email address
+
+```
+```
+✗ `Registration failed: Password too weak`
+Password must be at least 8 characters with mixed case and numbers
+```
+
+### Login
+
+```
+mangahub auth login --username <username>
+# Prompts for password
+```
+```
+# Alternative: login with email
+mangahub auth login --email <email>
+```
+```
+# Example
+mangahub auth login --username johndoe
+```
+
+
+**Expected Output:**
+
+```
+Password: [hidden input]
+
+✓ `Login successful!`
+Welcome back, johndoe!
+
+Session Details:
+Token expires: 2024-01-21 10:30:00 UTC (24 hours)
+Permissions: read, write, sync
+
+Auto-sync: enabled
+Notifications: enabled
+
+Ready to use MangaHub! Try:
+mangahub manga search "your favorite manga"
+
+```
+
+**Error Cases:**
+
+```
+✗ `Login failed: Invalid credentials`
+Check your username and password
+
+```
+```
+✗ `Login failed: Account not found`
+Try: mangahub auth register --username johndoe --email john@example.com
+
+```
+```
+✗ `Login failed: Server connection error`
+Check server status: mangahub server status
+```
+
+### Logout
+
+```
+mangahub auth logout
+# Removes stored authentication token
+```
+### Check Authentication Status
+```
+mangahub auth status
+# Shows current login status and user information
+```
+### Change Password
+```
+mangahub auth change-password
+# Prompts for current password and new password
+```
+## Manga Management
+### Search Manga
+```
+# Basic search
+mangahub manga search <query>
+```
+```
+# Search with filters
+mangahub manga search <query> --genre <genre> --status <status>
+```
+```
+# Examples
+mangahub manga search "attack on titan"
+mangahub manga search "romance" --genre romance --status completed
+mangahub manga search "naruto" --limit 5
+```
+
+**Expected Output:**
+
+
+```
+Searching for "attack on titan"...
+
+Found 3 results:
+
+┌─────────────────────┬──────────────────────┬───────────┬──────────┬────────
+─────┐
+│ ID                  │ Title                │ Author     │ Status  │
+Chapters  │
+├─────────────────────┼──────────────────────┼───────────┼──────────┼────────
+─────┤
+│ attack-on-titan     │ Attack on Titan      │ Isayama  │ Completed│ 139
+│
+│                     │ (Shingeki no Kyojin) │ Hajime    │          │
+│
+├─────────────────────┼──────────────────────┼───────────┼──────────┼────────
+─────┤
+│ attack-on-titan-jr  │ Attack on Titan:     │ Isayama   │ Completed│ 7
+│
+│                     │ Junior High          │ Hajime    │          │
+│
+├─────────────────────┼──────────────────────┼───────────┼──────────┼────────
+─────┤
+│ aot-before-fall     │ Attack on Titan:     │ Suzukaze  │ Completed│ 17
+│
+│                     │ Before the Fall      │ Ryo       │          │
+│
+└─────────────────────┴──────────────────────┴───────────┴──────────┴────────
+─────┘
+
+Use 'mangahub manga info <id>' to view details
+Use 'mangahub library add --manga-id <id>' to add to your library
+
+```
+
+**No Results Output:**
+
+```
+Searching for "nonexistent manga"...
+
+No manga found matching your search criteria.
+
+Suggestions:
+- Check spelling and try again
+
+- Use broader search terms
+
+- Browse by genre: mangahub manga list --genre action
+```
+
+### View Manga Details
+```
+mangahub manga info <manga-id>
+
+# Example
+mangahub manga info one-piece
+
+```
+
+**Expected Output:**
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│              ONE PIECE                                              │
+└─────────────────────────────────────────────────────────────────────┘
+
+Basic Information:
+ID: one-piece
+Title: One Piece ( ワンピース )
+Author: Oda Eiichiro
+Artist: Oda Eiichiro
+Genres: Action, Adventure, Comedy, Drama, Shounen
+Status: Ongoing
+Year: 1997
+
+Progress:
+Total Chapters: 1,100+
+Total Volumes: 107+
+Serialization: Weekly Shounen Jump
+Publisher: Shueisha
+
+Your Status: Currently Reading
+Current Chapter: 1,095
+Last Updated: 2024-01-20 15:30:00
+Started Reading: 2023-03-15
+Personal Rating: 9/10
+
+Description:
+Monkey D. Luffy, a boy whose body gained the properties of rubber after
+eating a Devil Fruit, explores the Grand Line with his diverse crew of
+pirates in search of the treasure known as "One Piece" to become the
+next Pirate King.
+
+External Links:
+MyAnimeList: https://myanimelist.net/manga/13
+MangaDx: https://mangadx.org/title/a1c7c817-4e59-43b7-9365-09675a149a6f
+
+Actions:
+Update Progress: mangahub progress update --manga-id one-piece --chapter
+1096
+Rate/Review: mangahub library update --manga-id one-piece --rating 10
+Remove: mangahub library remove --manga-id one-piece
+
+```
+
+**Not Found Output:**
+
+```
+✗ `Manga not found: 'nonexistent-id'`
+
+
+Try searching instead:
+mangahub manga search "manga title"
+```
+### List All Manga
+```
+# List all manga in database
+mangahub manga list
+
+# List with pagination
+mangahub manga list --page 2 --limit 20
+
+# Filter by genre
+mangahub manga list --genre shounen
+```
+### Advanced Search Options
+```
+mangahub manga search "keyword" \
+ --genre "action,adventure" \
+ --status "ongoing" \
+ --author "author name" \
+ --year-from 2020 \
+ --year-to 2024 \
+ --min-chapters 50 \
+ --sort-by "popularity" \
+ --order "desc"
+```
+## Library Operations
+### Add Manga to Library
+```
+mangahub library add --manga-id <id> --status <status>
+
+# Status options: reading, completed, plan-to-read, on-hold, dropped
+# Examples
+mangahub library add --manga-id one-piece --status reading
+mangahub library add --manga-id death-note --status completed --rating 9
+```
+
+### View Library
+```
+# View entire library
+mangahub library list
+
+# Filter by status
+mangahub library list --status reading
+mangahub library list --status completed
+
+# Sort options
+mangahub library list --sort-by title
+mangahub library list --sort-by last-updated --order desc
+
+```
+
+**Expected Output:**
+
+```
+Your Manga Library (47 entries)
+
+Currently Reading (8):
+┌──────────────────┬────────────────────────┬─────────┬────────────┬─────────
+─┬──────────┐
+│ ID               │ Title                  │ Chapter │ Rating      │ Started
+│ Updated │
+├──────────────────┼────────────────────────┼─────────┼────────────┼─────────
+─┼──────────┤
+│ one-piece        │ One Piece              │ 1095/?? │ 9/10       │ 2023-03
+│ Just now         │
+│ jujutsu-kaisen   │ Jujutsu Kaisen        │ 247/??  │ 8/10       │ 2023-10
+│ 2 days  │
+│ attack-on-titan │ Attack on Titan    │ 89/139 │ Unrated  │ 2024-01
+│ 1 week  │
+│ demon-slayer   │ Demon Slayer     │ 156/205 │ 7/10    │ 2023-12
+│ 3 days  │
+└──────────────────┴────────────────────────┴─────────┴────────────┴─────────
+─┴──────────┘
+
+Completed (15):
+┌──────────────────┬────────────────────────┬─────────┬────────────┬─────────
+─────────────┐
+│ ID        │ Title         │ Chapters│ Rating   │
+Completed      │
+├──────────────────┼────────────────────────┼─────────┼────────────┼─────────
+─────────────┤
+│ death-note    │ Death Note       │ 108/108 │ 10/10   │ 2023-0815      │
+│ fullmetal    │ Fullmetal Alchemist  │ 108/108 │ 9/10    │ 2023-0922      │
+│ naruto      │ Naruto         │ 700/700 │ 8/10    │ 2023-1130      │
+└──────────────────┴────────────────────────┴─────────┴────────────┴─────────
+─────────────┘
+
+Plan to Read (18), On Hold (4), Dropped (2)
+
+Use --status <status> to filter by specific status
+Use --verbose for detailed view with descriptions
+
+```
+
+**Empty Library Output:**
+
+```
+Your library is empty.
+
+Get started by searching and adding manga:
+mangahub manga search "your favorite series"
+mangahub library add --manga-id <id> --status reading
+
+```
+
+### Remove from Library
+
+```
+mangahub library remove --manga-id <id>
+
+# Example
+mangahub library remove --manga-id completed-series
+```
+### Update Library Entry
+```
+mangahub library update --manga-id <id> --status <new-status>
+
+# Example
+mangahub library update --manga-id one-piece --status completed --rating 10
+```
+## Progress Tracking
+### Update Reading Progress
+```
+mangahub progress update --manga-id <id> --chapter <number>
+
+# With additional info
+mangahub progress update --manga-id <id> --chapter <number> --volume <number>
+
+# Examples
+mangahub progress update --manga-id one-piece --chapter 1095
+mangahub progress update --manga-id naruto --chapter 700 --volume 72 --notes
+"Great ending!"
+
+```
+
+**Expected Output:**
+
+```
+Updating reading progress...
+
+✓ `Progress updated successfully!`
+
+
+Manga: One Piece
+Previous: Chapter 1,094
+Current: Chapter 1,095 (+1)
+Updated: 2024-01-20 16:45:00 UTC
+
+Sync Status:
+
+
+`Local database:` ✓ `Updated`
+`TCP sync server:` ✓ `Broadcasting to 3 connected devices`
+`Cloud backup:` ✓ `Synced`
+
+
+Statistics:
+Total chapters read: 1,095
+Reading streak: 45 days
+Estimated completion: Never (ongoing series)
+
+Next actions:
+Continue reading: Chapter 1,096 available
+Rate this chapter: mangahub library update --manga-id one-piece --rating 9
+
+```
+
+**Error Cases:**
+
+```
+✗ `Progress update failed: Chapter 2000 exceeds manga's total chapters (1100)`
+Valid range: 1-1100
+
+```
+```
+✗ `Progress update failed: Chapter 50 is behind your current progress`
+
+(Chapter 95)
+Use --force to set backwards progress: --force --chapter 50
+
+```
+```
+✗ `Progress update failed: Manga 'invalid-id' not found in your library`
+Add to library first: mangahub library add --manga-id invalid-id --status
+reading
+```
+
+### View Progress History
+```
+mangahub progress history --manga-id <id>
+
+# View all progress updates
+mangahub progress history
+```
+### Sync Progress
+```
+# Manual sync with server
+mangahub progress sync
+
+# Check sync status
+mangahub progress sync-status
+```
+## Network Protocol Features
+### TCP Progress Synchronization
+```
+# Connect to TCP sync server
+mangahub sync connect
+
+# Disconnect from sync server
+mangahub sync disconnect
+
+# Check connection status
+mangahub sync status
+
+# View real-time progress updates
+mangahub sync monitor
+
+```
+
+**Expected Output for** **`mangahub sync connect`** **:**
+
+```
+Connecting to TCP sync server at localhost:9090...
+
+✓ `Connected successfully!`
+
+Connection Details:
+Server: localhost:9090
+User: johndoe (usr_1a2b3c4d5e)
+Session ID: sess_9x8y7z6w5v
+Connected at: 2024-01-20 17:00:00 UTC
+
+Sync Status:
+Auto-sync: enabled
+Conflict resolution: last_write_wins
+Devices connected: 3 (mobile, desktop, web)
+
+Real-time sync is now active. Your progress will be synchronized across all
+devices.
+
+```
+
+**Expected Output for** **`mangahub sync status`** **:**
+
+```
+TCP Sync Status:
+
+`Connection:` ✓ `Active`
+Server: localhost:9090
+Uptime: 2h 15m 30s
+Last heartbeat: 2 seconds ago
+
+Session Info:
+User: johndoe
+Session ID: sess_9x8y7z6w5v
+Devices online: 3
+
+Sync Statistics:
+Messages sent: 47
+Messages received: 23
+Last sync: 30 seconds ago (One Piece ch. 1095)
+Sync conflicts: 0
+
+Network Quality: Excellent (RTT: 15ms)
+
+```
+
+**Expected Output for** **`mangahub sync monitor`** **:**
+
+```
+Monitoring real-time sync updates... (Press Ctrl+C to exit)
+
+[17:05:12] ← Device 'mobile' updated: Jujutsu Kaisen → Chapter 248
+[17:05:45] → Broadcasting update: Attack on Titan → Chapter 90
+[17:06:23] ← Device 'web' updated: Demon Slayer → Chapter 157
+[17:07:01] ← Device 'mobile' updated: One Piece → Chapter 1096
+[17:07:35] → Broadcasting update: One Piece → Chapter 1096 (sync conflict
+resolved)
+
+```
+
+
+Real-time sync monitoring active. Updates appear as they happen.
+
+### UDP Notifications
+```
+# Subscribe to chapter release notifications
+mangahub notify subscribe
+
+# Unsubscribe from notifications
+mangahub notify unsubscribe
+
+# View notification preferences
+mangahub notify preferences
+
+# Test notification system
+mangahub notify test
+```
+### gRPC Service Operations
+```
+# Query manga via gRPC
+mangahub grpc manga get --id <manga-id>
+
+# Search via gRPC
+mangahub grpc manga search --query <search-term>
+
+# Update progress via gRPC
+mangahub grpc progress update --manga-id <id> --chapter <number>
+```
+## Chat System
+### Connect to Chat
+```
+# Join general chat
+mangahub chat join
+
+# Join specific manga discussion
+mangahub chat join --manga-id <id>
+
+# Example
+mangahub chat join --manga-id one-piece
+
+```
+
+**Expected Output for** **`mangahub chat join`** **:**
+
+```
+Connecting to WebSocket chat server at ws://localhost:9093...
+
+```
+
+✓ `Connected to General Chat`
+
+```
+Chat Room: #general
+Connected users: 12
+Your status: Online
+
+```
+
+```
+Recent messages:
+[16:45] alice: Just finished reading the latest chapter!
+[16:47] bob: Which manga are you reading?
+[16:48] alice: Attack on Titan, it's getting intense
+[16:50] charlie: No spoilers please!
+
+─────────────────────────────────────────────────────────────
+You are now in chat. Type your message and press Enter.
+Type /help for commands or /quit to leave.
+
+johndoe>
+
+```
+
+**Expected Output for Chat Commands:**
+
+```
+johndoe> /help
+
+Chat Commands:
+/help      - Show this help
+/users     - List online users
+/quit      - Leave chat
+/pm <user> <msg>- Private message
+/manga <id>   - Switch to manga chat
+/history    - Show recent history
+/status     - Connection status
+
+johndoe> /users
+
+Online Users (12):
+● alice (General Chat)
+● bob (General Chat)
+● charlie (General Chat)
+● diana (One Piece Discussion)
+● elena (Attack on Titan Discussion)
+● frank (General Chat)
+[... 6 more users]
+
+johndoe> Hello everyone!
+[17:02] johndoe: Hello everyone!
+[17:02] alice: Hey johndoe! Welcome to the chat
+[17:03] bob: Hi there! What are you reading these days?
+
+johndoe> /quit
+Leaving chat...
+
+✓ `Disconnected from chat server`
+```
+
+### Send Messages
+
+```
+# Send message to current chat
+mangahub chat send "Hello everyone!"
+
+# Send message to specific manga chat
+mangahub chat send "Great chapter!" --manga-id one-piece
+```
+### Chat Commands (Interactive Mode)
+
+
+When in chat mode, use these commands: - `/help` - Show chat commands
+
+
+  - `/users`  - List online users
+
+
+  - `/quit`  - Leave chat
+
+
+  - `/pm <username> <message>`  - Private message
+
+
+  - `/manga <id>`  - Switch to manga-specific chat
+
+### View Chat History
+
+```
+# View recent messages
+mangahub chat history
+
+# View messages for specific manga
+mangahub chat history --manga-id one-piece --limit 50
+```
+## Statistics and Analytics
+### Reading Statistics
+```
+# View personal reading statistics
+mangahub stats overview
+
+# Detailed breakdown
+mangahub stats detailed
+
+# Stats for specific time period
+mangahub stats --from 2024-01-01 --to 2024-12-31
+```
+### Export Data
+```
+# Export library to JSON
+mangahub export library --format json --output library.json
+
+# Export reading progress
+mangahub export progress --format csv --output progress.csv
+
+# Full data export
+mangahub export all --output mangahub-backup.tar.gz
+
+```
+
+## Server Management
+### Start Server Components
+
+```
+# Start all servers
+mangahub server start
+
+# Start specific servers
+mangahub server start --http-only
+mangahub server start --tcp-only
+mangahub server start --udp-only
+
+```
+
+**Expected Output for** **`mangahub server start`** **:**
+
+```
+Starting MangaHub Server Components...
+
+[1/5] HTTP API Server
+✓ `Starting on http://localhost:8080`
+✓ `Database connection established`
+✓ `JWT middleware loaded`
+✓ `12 routes registered`
+Status: Running
+
+[2/5] TCP Sync Server
+✓ `Starting on tcp://localhost:9090`
+✓ `Connection pool initialized (max: 100)`
+✓ `Broadcast channels ready`
+Status: Listening for connections
+
+[3/5] UDP Notification Server
+✓ `Starting on udp://localhost:9091`
+✓ `Client registry initialized`
+✓ `Notification queue ready`
+Status: Ready for broadcasts
+
+[4/5] gRPC Internal Service
+✓ `Starting on grpc://localhost:9092`
+✓ `3 services registered`
+✓ `Protocol buffers loaded`
+Status: Serving
+
+[5/5] WebSocket Chat Server
+✓ `Starting on ws://localhost:9093`
+✓ `Chat rooms initialized`
+✓ `User registry ready`
+
+Status: Ready for connections
+
+All servers started successfully!
+
+Server URLs:
+  HTTP API:  http://localhost:8080
+  TCP Sync:  tcp://localhost:9090
+  UDP Notify: udp://localhost:9091
+  gRPC:    grpc://localhost:9092
+  WebSocket:  ws://localhost:9093
+
+Logs: tail -f ~/.mangahub/logs/server.log
+Stop: mangahub server stop
+```
+### Server Status
+```
+# Check server status
+mangahub server status
+
+# Detailed health check
+mangahub server health
+
+```
+
+**Expected Output for** **`mangahub server status`** **:**
+
+```
+MangaHub Server Status
+
+┌─────────────────────┬──────────┬─────────────────────┬────────────┬────────
+────┐
+│ Service             │ Status   │ Address             │ Uptime     │ Load
+│
+├─────────────────────┼──────────┼─────────────────────┼────────────┼────────
+────┤
+`│ HTTP API           │✓  Online │ localhost:8080      │ 2h 15m     │ 12`
+req/min │
+`│ TCP Sync           │✓  Online │ localhost:9090      │ 2h 15m     │ 3`
+clients │
+`│ UDP Notifications  │✓  Online │ localhost:9091      │ 2h 15m     │ 8`
+clients │
+`│ gRPC Internal      │✓  Online │ localhost:9092      │ 2h 15m     │ 5`
+req/min │
+`│ WebSocket Chat     │✓  Online │ localhost:9093      │ 2h 15m     │ 12`
+users  │
+└─────────────────────┴──────────┴─────────────────────┴────────────┴────────
+────┘
+
+`Overall System Health:` ✓ `Healthy`
+
+Database:
+
+  `Connection:` ✓ `Active`
+  Size: 2.1 MB
+  Tables: 3 (users, manga, user_progress)
+
+  Last backup: 2024-01-20 12:00:00
+
+Memory Usage: 45.2 MB / 512 MB (8.8%)
+CPU Usage: 2.3% average
+Disk Space: 892 MB / 10 GB available
+
+```
+**Error Status Output:**
+```
+MangaHub Server Status
+
+┌─────────────────────┬──────────┬─────────────────────┬────────────┬────────
+────┐
+│ Service             │ Status   │ Address             │ Uptime     │ Load
+│
+├─────────────────────┼──────────┼─────────────────────┼────────────┼────────
+────┤
+`│ HTTP API           │✓  Online │ localhost:8080      │ 45m        │ 8`
+req/min │
+`│ TCP Sync           │✗ Error   │ localhost:9090      │ -          │ -`
+│
+`│ UDP Notifications  │ ⚠ Warn   │ localhost:9091      │ 45m        │ 0`
+clients │
+`│ gRPC Internal      │✓  Online │ localhost:9092      │ 45m        │ 2`
+req/min │
+`│ WebSocket Chat     │✓  Online │ localhost:9093      │ 45m        │ 5 users`
+│
+└─────────────────────┴──────────┴─────────────────────┴────────────┴────────
+────┘
+`Overall System Health:` ⚠ `Degraded`
+
+Issues Detected:
+
+✗ `TCP Sync Server: Port 9090 already in use`
+Solution: Kill process on port 9090 or change port in config
+
+⚠ `UDP Notifications: No clients registered`
+This is normal if no users have subscribed to notifications
+Run 'mangahub server health' for detailed diagnostics
+```
+
+### Stop Servers
+```
+# Stop all servers
+mangahub server stop
+
+# Stop specific server
+mangahub server stop --component http
+```
+
+
+### Server Status
+
+```
+# Check server status
+mangahub server status
+
+# Detailed health check
+mangahub server health
+```
+### Server Logs
+```
+# View server logs
+mangahub server logs
+
+# Follow logs in real-time
+mangahub server logs --follow
+
+# Filter logs by level
+mangahub server logs --level error
+```
+## Configuration
+### View Configuration
+```
+# Show current configuration
+mangahub config show
+
+# Show specific section
+mangahub config show server
+```
+### Update Configuration
+```
+# Set configuration value
+mangahub config set server.host "192.168.1.100"
+mangahub config set notifications.enabled false
+
+# Reset to defaults
+mangahub config reset
+```
+### Profile Management
+```
+# Create new profile
+mangahub profile create --name work
+
+# Switch profiles
+mangahub profile switch --name work
+
+# List profiles
+mangahub profile list
+
+```
+## Advanced Features
+### Batch Operations
+```
+# Batch add manga to library
+mangahub library batch-add --file manga-list.txt --status plan-to-read
+
+# Batch update progress
+mangahub progress batch-update --file progress-updates.csv
+```
+### Backup and Restore
+```
+# Create backup
+mangahub backup create --output backup-2024.tar.gz
+
+# Restore from backup
+mangahub backup restore --input backup-2024.tar.gz
+```
+### Database Operations
+```
+# Database integrity check
+mangahub db check
+
+# Optimize database
+mangahub db optimize
+
+# Database statistics
+mangahub db stats
+```
+## Troubleshooting
+### Common Issues
+
+_Authentication Problems_
+```
+# Clear authentication data
+mangahub auth clear
+
+# Re-register if needed
+mangahub auth register --username <username> --email <email>
+
+```
+
+**Expected Output for** **`mangahub auth clear`** **:**
+
+```
+Clearing authentication data...
+
+✓ `Authentication token removed`
+✓ `User session cleared`
+✓ `Sync connections terminated`
+✓ `Cache cleared`
+
+You are now logged out. To continue using MangaHub:
+
+mangahub auth login --username <your-username>
+```
+Or register a new account:
+```
+mangahub auth register --username <username> --email <email>
+
+```
+
+_Connection Issues_
+```
+# Test server connectivity
+mangahub server ping
+
+# Reset network connections
+mangahub sync reconnect
+
+```
+
+**Expected Output for** **`mangahub server ping`** **:**
+
+```
+Testing MangaHub server connectivity...
+
+
+`HTTP API (localhost:8080):` ✓ `Online (15ms)`
+`└─ Authentication endpoint:` ✓ `Responding`
+`└─ Manga search endpoint:` ✓ `Responding`
+`└─ Database connection:` ✓ `Active`
+
+`TCP Sync (localhost:9090):` ✓ `Online (8ms)`
+`└─ Connection accepted:` ✓ `Success`
+`└─ Authentication test:` ✓ `Success`
+`└─ Heartbeat response:` ✓ `Success`
+
+`UDP Notify (localhost:9091):` ✓ `Online (3ms)`
+`└─ Registration test:` ✓ `Success`
+`└─ Echo test:` ✓ `Success`
+
+`gRPC Service (localhost:9092):` ✓ `Online (12ms)`
+`└─ Health check:` ✓ `Serving`
+`└─ Service discovery:` ✓ `3 services found`
+
+`WebSocket Chat (localhost:9093):` ✓ `Online (18ms)`
+`└─ Upgrade handshake:` ✓ `Success`
+`└─ Echo test:` ✓ `Success`
+
+`Overall connectivity:` ✓ `All services reachable`
+
+Network quality: Excellent
+
+```
+
+**Connection Issues Output:**
+
+```
+Testing MangaHub server connectivity...
+
+
+`HTTP API (localhost:8080):` ✗ `Timeout (>5000ms)`
+└─ Error: Connection refused
+
+
+`TCP Sync (localhost:9090):` ✗ `Failed`
+└─ Error: No route to host
+
+
+`UDP Notify (localhost:9091):` ⚠ `Partial (250ms)`
+`└─ Registration test:` ✗ `Timeout`
+`└─ Echo test:` ✓ `Success (slow)`
+
+`gRPC Service (localhost:9092):` ✗ `Failed`
+└─ Error: Connection refused
+
+`WebSocket Chat (localhost:9093):` ✗ `Failed`
+└─ Error: Connection refused
+
+`Overall connectivity:` ✗ `Major issues detected`
+
+Troubleshooting suggestions:
+1. Check if servers are running: mangahub server status
+
+2. Start servers: mangahub server start
+
+3. Check firewall settings
+
+4. Verify config file: mangahub config show server
+
+5. Check logs: mangahub server logs --level error
+```
+
+_Database Issues_
+
+```
+# Repair database
+mangahub db repair
+
+# Reinitialize if needed
+mangahub init --force
+
+```
+
+**Expected Output for** **`mangahub db repair`** **:**
+
+```
+Running database integrity check and repair...
+
+Database: ~/.mangahub/data.db
+Size: 2.3 MB
+
+Checking tables...
+
+`users table:` ✓ `15 records, no corruption`
+`manga table:` ✓ `42 records, no corruption`
+`user_progress table:` ⚠ `127 records, 3 orphaned entries found`
+
+Repairing issues...
+
+
+✓ `Removed 3 orphaned progress entries`
+✓ `Rebuilt indexes for performance`
+✓ `Updated database statistics`
+✓ `Compressed database (saved 0.3 MB)`
+
+Database repair completed successfully!
+
+Summary:
+Issues found: 3 orphaned entries
+Issues fixed: 3
+Performance: Improved (faster queries expected)
+Size after repair: 2.0 MB
+
+Your data is intact and the database is now optimized.
+
+```
+
+**Database Corruption Output:**
+
+```
+Running database integrity check and repair...
+
+Database: ~/.mangahub/data.db
+Size: 2.3 MB
+
+✗ `Critical database corruption detected!`
+
+Issues found:
+- users table: 5 corrupted records
+- manga table: Schema mismatch
+- user_progress table: Index corruption
+
+
+⚠ `Automatic repair failed. Manual intervention required.`
+
+Recovery options:
+1. Restore from backup:
+mangahub backup restore --input backup-2024.tar.gz
+
+2. Reinitialize database (DESTROYS ALL DATA):
+mangahub init --force --wipe-data
+
+3. Export recoverable data first:
+mangahub export library --output library-backup.json --ignore-errors
+
+Contact support if you need assistance with data recovery.
+
+```
+
+_Connection Issues_
+```
+# Test server connectivity
+mangahub server ping
+
+# Reset network connections
+mangahub sync reconnect
+```
+_Database Issues_
+```
+# Repair database
+mangahub db repair
+
+# Reinitialize if needed
+mangahub init --force
+```
+### Debug Mode
+```
+# Run with debug logging
+mangahub --verbose <command>
+
+# Enable trace logging
+mangahub config set logging.level trace
+```
+### Log Analysis
+```
+# View error logs
+mangahub logs errors
+
+# Search logs
+mangahub logs search "connection failed"
+
+# Clear old logs
+mangahub logs clean --older-than 30d
+```
+## Examples and Use Cases
+### Daily Usage Workflow
+```
+# Morning routine
+mangahub server start &
+mangahub sync connect
+mangahub notify subscribe
+
+# Check for new chapters
+mangahub manga search --new-chapters
+
+# Update reading progress
+mangahub progress update --manga-id current-read --chapter 42
+
+# Join community chat
+mangahub chat join
+```
+### Bulk Library Management
+```
+# Export current library for backup
+mangahub export library --format json --output backup.json
+
+# Import manga from another service
+mangahub import --format mal --input myanimelist-export.xml
+
+# Bulk status update
+mangahub library batch-update --status completed --file completed-manga.txt
+```
+### Server Administration
+```
+# Start production server
+mangahub server start --config production.yaml --daemon
+
+# Monitor server health
+mangahub server health --continuous
+
+# Rotate logs
+mangahub logs rotate
+```
+## API Integration
+### Custom Scripts
+The CLI can be used in shell scripts:
+
+```
+#!/bin/bash
+# Auto-update reading progress from external source
+
+while IFS=',' read -r manga_id chapter ; do
+mangahub progress update --manga-id "$manga_id" --chapter "$chapter"
+done < progress-updates.csv
+```
+### JSON Output
+Most commands support JSON output for programmatic use:
+```
+# Get library as JSON
+mangahub library list --output json
+
+# Search results as JSON
+mangahub manga search "keyword" --output json | jq '.results[].title'
+```
+## Support and Updates
+### Getting Help
+```
+# General help
+mangahub help
+
+# Command-specific help
+
+mangahub manga help
+mangahub library help
+```
+### Version Information
+```
+# Check version
+mangahub version
+
+# Check for updates
+mangahub update check
+
+# Update to latest version
+mangahub update install
+```
+### Bug Reports
+To report issues: 
+1. Run command with `--verbose` flag
+2. Check logs: `mangahub logs errors`
+3. Include system info: `mangahub system info`
+
+This manual covers all major functionality of the MangaHub CLI application. For additional
+features or specific use cases, refer to the built-in help system or consult the online
+documentation.
+</file>
+
+<file path="docs/mangahub_project_spec (1).md">
+# MangaHub - Manga & Comic Tracking System
+## Network Programming (Net Centric Programming) – IT096IU Term Project Description - Revised Scope
+
+**Instructor:** Lê Thanh Sơn - Nguyễn Trung Nghĩa
+**Course:** Net-centric Programming - IT096IU
+**Programming Language:** Go
+**Team Size:** 2 students per group
+**Timeline:** 10-11 weeks
+## Objectives
+
+  - To allow students to gain practical experience of network application development
+using Go programming language with realistic scope
+
+
+  - To allow students to experience all five required communication protocols (TCP,
+UDP, HTTP, gRPC, WebSocket) through hands-on implementation
+
+
+  - To strengthen understanding of networking concepts through manageable,
+progressive implementation
+
+
+  - To develop foundational skills in concurrent programming and basic distributed
+system patterns
+
+
+  - To create a working system that demonstrates network programming competency
+within academic constraints
+
+## Project Deliverables
+
+  - **Source code and documentation** must be submitted on Blackboard before due
+date. Zip all your files and name it GroupXX_MangaHub.zip (ex:
+Group01_MangaHub.zip)
+
+
+  - **A demonstration session** will be held at the end of the course showing all five
+protocols working together
+
+
+  - **Fail to show up** during the demonstration session will result in **ZERO grading** for
+project
+
+## Due Date
+
+  - **Final Submission:** 23:59 on demo day
+
+
+  - **Demo Session:** Will be announced later
+
+
+## Project Task: MangaHub - Manga Tracking System
+
+You will build **MangaHub**, a manga tracking system that demonstrates network
+programming concepts through practical implementation. The system will use all five
+required protocols in a cohesive application while maintaining realistic scope for 11-week
+development by student teams.
+
+
+**Programming Language Requirements:** **Go** . You must implement TCP, UDP, HTTP, gRPC,
+and WebSocket communication.
+## Manga Database
+### Data Collection Requirements
+
+
+Build a basic manga database through manageable data collection:
+
+
+  - **Manual Entry:** 100 popular manga series with essential metadata
+
+
+  - **Simple API Integration:** 100 additional series from MangaDx API (or others legal
+API)using basic calls
+
+
+  - **Educational Practice:** Limited web scraping from practice sites
+(quotes.toscrape.com, httpbin.org)
+
+
+  - **JSON Storage:** Store data in JSON format for simplicity
+
+
+The manga database must include: - At least **30-40 different manga series** across major
+genres
+
+
+  - At least **15-20 series per major genre** (shounen, shoujo, seinen, josei, etc.)
+
+
+  - Basic metadata: title, author, genres, status, chapter count, description
+
+### Simplified Data Structure
+
+```
+{
+ "id": "one-piece",
+ "title": "One Piece",
+ "author": "Oda Eiichiro",
+ "genres": ["Action", "Adventure", "Shounen"],
+ "status": "ongoing",
+ "total_chapters": 1100,
+ "description": "A young pirate's adventure...",
+ "cover_url": "https://example.com/covers/one-piece.jpg"
+}
+```
+
+### User Data Management
+```
+{
+ "user_id": "user123",
+
+
+
+
+ "username": "manga_lover",
+ "reading_lists": {
+  "reading": [
+   {
+    "manga_id": "one-piece",
+    "current_chapter": 1095,
+    "status": "reading",
+    "last_updated": "2024-01-20T10:30:00Z"
+   }
+  ],
+  "completed": [],
+  "plan_to_read": []
+ }
+}
+```
+
+## System Architecture
+### Core Components
+
+
+_1._ _**HTTP REST API Server**_ _(25 points)_
+
+
+Basic RESTful service with essential endpoints:
+
+```
+// Core server structure
+type APIServer struct {
+Router   *gin.Engine
+Database  *sql.DB
+JWTSecret string
+}
+
+```
+
+**Essential Endpoints:** - POST /auth/register - User registration
+
+
+  - POST /auth/login - User authentication
+
+
+  - GET /manga - Search manga with basic filters
+
+
+  - GET /manga/{id} - Get manga details
+
+
+  - POST /users/library - Add manga to library
+
+
+  - GET /users/library - Get user’s library
+
+
+  - PUT /users/progress - Update reading progress
+
+
+**Requirements:** - JWT-based authentication
+
+
+  - SQLite database integration
+
+
+  - JSON request/response handling
+
+
+  - Basic error handling and logging
+
+
+  - Input validation
+
+
+_2._ _**TCP Progress Sync Server**_ _(20 points)_
+
+
+Simple TCP server for basic progress broadcasting:
+
+```
+// Basic TCP server
+type ProgressSyncServer struct {
+Port    string
+Connections map [string]net.Conn
+Broadcast  chan ProgressUpdate
+}
+
+type ProgressUpdate struct {
+UserID   string `json:"user_id"`
+MangaID   string `json:"manga_id"`
+Chapter   int `json:"chapter"`
+Timestamp  int64 `json:"timestamp"`
+}
+
+```
+
+**Requirements:** - Accept multiple TCP connections
+
+
+  - Broadcast progress updates to connected clients
+
+
+  - Handle client connections and disconnections
+
+
+  - Basic JSON message protocol
+
+
+  - Simple concurrent connection handling with goroutines
+
+
+_3._ _**UDP Notification System**_ _(15 points)_
+
+
+Basic UDP broadcaster for chapter notifications:
+
+```
+// Simple UDP notifier
+type NotificationServer struct {
+Port   string
+Clients  []net.UDPAddr
+}
+
+type Notification struct {
+Type   string `json:"type"`
+MangaID  string `json:"manga_id"`
+Message  string `json:"message"`
+Timestamp int64 `json:"timestamp"`
+}
+
+```
+
+**Requirements:** - UDP server listening for client registrations
+
+
+  - Broadcast chapter release notifications
+
+
+  - Handle client list management
+
+
+  - Basic error logging
+
+
+_4._ _**WebSocket Chat System**_ _(15 points)_
+
+
+Simple real-time chat for manga discussions:
+
+```
+// Basic WebSocket hub
+type ChatHub struct {
+Clients   map [*websocket.Conn]string
+Broadcast  chan ChatMessage
+Register  chan ClientConnection
+Unregister chan *websocket.Conn
+}
+
+type ChatMessage struct {
+UserID  string `json:"user_id"`
+Username string `json:"username"`
+Message  string `json:"message"`
+Timestamp int64 `json:"timestamp"`
+}
+
+```
+
+**Requirements:** - WebSocket connection handling
+
+
+  - Real-time message broadcasting
+
+
+  - User join/leave functionality
+
+
+  - Basic connection management
+
+
+_5._ _**gRPC Internal Service**_ _(10 points)_
+
+
+Simple gRPC service for internal communication:
+
+```
+service MangaService {
+rpc GetManga(GetMangaRequest) returns (MangaResponse);
+rpc SearchManga(SearchRequest) returns (SearchResponse);
+rpc UpdateProgress(ProgressRequest) returns (ProgressResponse);
+}
+
+```
+
+**Requirements:** - Protocol Buffer definitions for 2-3 services
+
+
+  - Basic gRPC server implementation
+
+
+  - Simple client integration
+
+
+  - Unary RPC calls
+
+
+_6._ _**Database Layer**_ _(10 points)_
+```
+-- Simplified schema
+CREATE TABLE users (
+  id TEXT PRIMARY KEY,
+username TEXT UNIQUE,
+password_hash TEXT,
+created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE manga (
+  id TEXT PRIMARY KEY,
+title TEXT,
+author TEXT,
+genres TEXT, -- JSON array as text
+status TEXT,
+total_chapters INTEGER,
+description TEXT
+);
+
+CREATE TABLE user_progress (
+user_id TEXT,
+manga_id TEXT,
+current_chapter INTEGER,
+status TEXT,
+updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, manga_id)
+);
+```
+## Network Communication Requirements
+### Protocol Implementation Expectations
+
+
+1. **HTTP Services**
+
+`o` RESTful API with proper HTTP methods and status codes
+
+
+`o` Basic JWT authentication
+
+
+`o` Error handling with appropriate HTTP responses
+
+
+`o` Simple CORS support for web clients
+
+
+2. **TCP Socket Communication**
+
+`o` Basic server accepting multiple connections
+
+
+`o` JSON-based message protocol
+
+
+`o` Concurrent connection handling with goroutines
+
+
+`o` Graceful connection termination
+
+
+3. **UDP Broadcasting**
+
+`o` Simple UDP server for notifications
+
+
+`o` Client registration mechanism
+
+
+`o` Basic broadcast functionality
+
+
+`o` Error handling for network failures
+
+
+4. **gRPC Services**
+
+`o` Protocol Buffer message definitions
+
+
+`o` Basic service
+
+
+`o` Client-server communication
+
+
+`o` Simple error handling
+
+
+5. **WebSocket Connections**
+
+`o` WebSocket upgrade handling
+
+
+`o` Real-time message broadcasting
+
+
+`o` Connection lifecycle management
+
+
+`o` Basic client management
+
+## Performance Requirements
+### Scalability Targets
+
+  - Support **50-100 concurrent users** during testing
+
+
+  - Handle **30-40 manga series** in database
+
+
+  - Process basic search queries within **500ms**
+
+
+  - Support **20-30 concurrent TCP connections**
+
+
+  - WebSocket chat with **10-20 simultaneous users**
+
+### Reliability Standards
+
+  - **80-90% uptime** during demonstration period
+
+
+  - Basic error handling and recovery
+
+
+  - Simple logging for debugging
+
+
+  - Graceful degradation when services are unavailable
+
+
+## Development Timeline (10 Weeks) - JUST FOR HINT
+### Phase 1: Foundation (Weeks 1-2)
+
+**Week 1: Project Setup & HTTP Basics** - Go project structure setup
+
+
+  - Basic HTTP server with Gin framework
+
+
+  - User registration and login endpoints
+
+
+  - SQLite database setup and basic schema
+
+
+**Week 2: Core HTTP API** - Manga data model and CRUD endpoints
+
+
+  - User library management endpoints
+
+
+  - Basic JWT authentication middleware
+
+
+  - API testing and validation
+
+
+**Week 3: Data Collection & Integration** - Manual manga data entry (20-30 series)
+
+
+  - Simple MangaDx API integration
+
+
+  - Data validation and storage
+
+
+  - API endpoint completion
+
+### Phase 2: Network Protocols (Weeks 3-7)
+
+
+**Week 3 TCP Implementation** - Basic TCP server setup
+
+
+  - Connection handling with goroutines
+
+
+  - Simple message protocol design
+
+
+  - Progress update broadcasting
+
+
+**Week 4: TCP Integration & Testing** - Connect TCP server to HTTP API
+
+
+  - Client connection testing
+
+
+  - Error handling and logging
+
+
+  - Integration with user progress system
+
+
+**Week 5: UDP Notification System** - UDP server implementation
+
+
+  - Client registration mechanism
+
+
+  - Basic notification broadcasting
+
+
+  - Integration testing
+
+
+**Week 6: WebSocket Chat** - WebSocket server setup
+
+
+  - Basic chat functionality
+
+
+  - Connection management
+
+
+  - Real-time message broadcasting
+
+
+**Week 7: gRPC Service** - Protocol Buffer definitions
+
+
+  - Basic gRPC service implementation
+
+
+  - Client integration
+
+
+  - Service testing
+
+### Phase 3: Integration & Testing (Weeks 8-10)
+
+
+**Week 8: System Integration** - Connect all protocols together
+
+
+  - End-to-end testing
+
+
+  - Bug fixes and stability improvements
+
+
+**Week 9: User Interface & Documentation** - Simple web interface (optional)
+
+
+  - API documentation
+
+
+  - Code documentation and comments
+
+### Phase 4: Demo Preparation (Week 10)
+
+
+**Week 10: Demo & Presentation**
+
+
+  - Demo script preparation
+
+
+  - Live demonstration practice
+
+
+  - Final code review and cleanup
+
+## Implementation Guidelines
+### Recommended Go Libraries
+
+
+**Core Framework:** - `github.com/gin-gonic/gin` - HTTP web framework `github.com/golang-jwt/jwt/v4` - JWT authentication - `github.com/gorilla/websocket` WebSocket support - `github.com/mattn/go-sqlite3` - SQLite database driver
+
+
+**gRPC:** - `google.golang.org/grpc` - gRPC framework - `google.golang.org/protobuf` Protocol Buffers
+
+
+**Testing:** - `github.com/stretchr/testify` - Testing utilities
+
+### Project Structure
+
+```
+mangahub/
+├── cmd/
+│  ├── api-server/main.go    # HTTP API server
+│  ├── tcp-server/main.go    # TCP sync server
+│  ├── udp-server/main.go    # UDP notification server
+│  └── grpc-server/main.go    # gRPC service server
+├── internal/
+│  ├── auth/           # Authentication logic
+│  ├── manga/          # Manga data management
+│  ├── user/           # User management
+│  ├── tcp/           # TCP server implementation
+│  ├── udp/           # UDP server implementation
+│  ├── websocket/        # WebSocket chat implementation
+│  └── grpc/           # gRPC service implementation
+├── pkg/
+│  ├── models/          # Data structures
+│  ├── database/         # Database utilities
+│  └── utils/          # Helper functions
+├── proto/            # Protocol Buffer definitions
+├── data/             # JSON data files
+├── docs/             # Documentation
+├── docker-compose.yml      # Development environment
+└── README.md           # Setup instructions
+```
+
+## Grading Criteria
+**Total: 30% of course grade (100-point scale)**
+
+### Core Protocol Implementation (40 points)
+
+  - **HTTP REST API (15 pts):** Complete endpoints with authentication and database
+integration
+
+
+  - **TCP Progress Sync (13 pts):** Working server with concurrent connections and
+broadcasting
+
+
+  - **UDP Notifications (18 pts):** Basic notification system with client management
+
+
+  - **WebSocket Chat (10 pts):** Real-time messaging with connection handling
+
+
+  - **gRPC Service (7 pts):** Basic service with 2-3 working methods
+
+
+### System Integration & Architecture (20 points)
+
+  - **Database Integration (8 pts):** Working data persistence with proper schema and
+relationships
+
+
+  - **Service Communication (7 pts):** All protocols integrated and working together
+seamlessly
+
+
+  - **Error Handling & Logging (3 pts):** Comprehensive error handling across all
+components
+
+
+  - **Code Structure & Organization (2 pts):** Proper Go project organization and
+modularity
+
+### Code Quality & Testing (10 points)
+
+  - **Go Code Quality (5 pts):** Proper Go idioms, error handling patterns, and concurrent
+programming
+
+
+  - **Testing Coverage (3 pts):** Unit tests for core functionality and integration tests
+
+
+  - **Code Documentation (2 pts):** Clear comments and function documentation
+
+### Documentation & Demo (10 points)
+
+  - **Technical Documentation (5 pts):** API documentation, setup instructions, and
+architecture overview
+
+
+  - **Live Demonstration (5 pts):** Successfully demonstrate all five protocols working
+with Q&A
+
+### Completed one or more random Bonus features to full fill 10 points
+## Bonus Features (Extra Credit)
+### Advanced Protocol Features (5-10 points)
+
+  - **Enhanced TCP Synchronization (10 pts):** Implement basic conflict resolution for concurrent updates
+
+```
+   type ConflictResolution struct {
+   Strategy  string // "last_write_wins", "merge", "user_choice"
+   Timestamp  int64
+   DeviceID  string
+   Resolution string
+   }
+
+```
+
+  - **WebSocket Room Management (10 pts):** Multiple chat rooms for different manga discussions
+
+
+```
+   type ChatRoom struct {
+   ID     string
+   MangaID   string
+   Participants map [string]*websocket.Conn
+   Messages  []ChatMessage
+   }
+
+```
+
+  - **UDP Delivery Confirmation (5 pts):** Implement acknowledgment system for reliable notifications
+
+
+  - **gRPC Streaming (10 pts):** Add server-side streaming for real-time updates
+
+### Enhanced Data Management (5-10 points)
+
+  - **Advanced Search & Filtering (5 pts):** Implement full-text search with multiple filters
+
+```
+   type SearchFilters struct {
+   Genres   []string
+   Status   string
+   YearRange  [2]int
+   Rating   float64
+   SortBy   string // "popularity", "rating", "recent"
+   }
+
+```
+
+  - **Data Caching with Redis (10 pts):** Implement Redis for frequently accessed data
+
+
+  - **Recommendation System (10 pts):** Basic collaborative filtering based on user reading patterns
+
+```
+   type RecommendationEngine struct {
+   UserSimilarity  map [string]float64
+   MangaSimilarity map [string][]string
+   UserProfiles   map [string]UserProfile
+   }
+
+### Social & Community Features (5-10 points)
+```
+
+  - **User Reviews & Ratings (8 pts):** Allow users to review and rate manga
+
+```
+   type Review struct {
+   UserID  string
+   MangaID  string
+   Rating  int // 1-10
+   Text   string
+   Timestamp int64
+   Helpful  int // helpful votes
+   }
+
+```
+
+  - **Friend System (5 pts):** Add/remove friends and view friends’ reading activity
+
+
+  - **Reading Lists Sharing (6 pts):** Share reading lists with other users
+
+
+  - **Activity Feed (7 pts):** Show recent activities from friends (completed manga,
+reviews)
+
+### Performance & Scalability (5-10 points)
+
+  - **Connection Pooling (6 pts):** Implement proper connection pooling for database and external APIs
+
+
+  - **Rate Limiting (5 pts):** Implement rate limiting for API endpoints to prevent abuse
+
+
+  - **Horizontal Scaling (8 pts):** Design system to support multiple server instances
+
+
+  - **Performance Monitoring (7 pts):** Add metrics collection and basic monitoring dashboard
+
+
+  - **Load Balancing (10 pts):** Implement load balancing for multiple service instances
+
+### Advanced User Features (5-12 points)
+
+  - **Reading Statistics (8 pts):** Detailed reading analytics and progress tracking
+
+```
+   type ReadingStats struct {
+   TotalChaptersRead int
+   ReadingTimeMinutes int
+   FavoriteGenres  []string
+   ReadingStreak   int
+   MonthlyGoals    map [string]int
+   }
+
+```
+
+  - **Notification Preferences (5 pts):** Customizable notification settings per user
+
+
+  - **Reading Goals & Achievements (10 pts):** Set reading goals and unlock
+achievements
+
+
+  - **Data Export/Import (10 pts):** Export user data to JSON/CSV, import from other
+services
+
+
+  - **Multiple Reading Lists (5 pts):** Support custom reading lists beyond basic
+categories
+
+### API & Integration Enhancements (5-10 points)
+
+  - **External API Integration (10 pts):** Integrate with additional manga APIs
+(MyAnimeList, AniList)
+
+
+  - **Webhook System (10 pts):** Allow external services to receive notifications via
+webhooks
+
+
+  - **API Versioning (10 pts):** Implement proper API versioning with backward
+compatibility
+
+
+  - **OpenAPI Documentation (5 pts):** Generate interactive API documentation
+
+
+  - **Mobile-Optimized Endpoints (10 pts):** Specialized endpoints optimized for mobile
+apps
+
+### Security & Reliability (5-10 points)
+
+  - **Advanced Authentication (10 pts):** Implement refresh tokens and secure session
+management
+
+
+  - **Input Sanitization (5 pts):** Comprehensive input validation and sanitization
+
+
+  - **Automated Backups (10 pts):** Implement automated database backup system
+
+
+  - **Health Checks (5 pts):** Add health check endpoints for all services
+
+
+  - **Graceful Shutdown (10 pts):** Implement graceful shutdown for all servers
+
+### Development & Deployment (5-10 points)
+
+  - **Docker Compose Setup (10 pts):** Complete containerization with multi-service
+setup
+
+
+  - **CI/CD Pipeline (10 pts):** Automated testing and deployment pipeline
+
+
+  - **Environment Configuration (5 pts):** Proper environment-based configuration
+management
+
+
+  - **Database Migrations (7 pts):** Automated database schema migration system
+
+
+  - **Monitoring & Alerting (8 pts):** Basic system monitoring with alert notifications
+
+## Bonus Feature Selection Strategy
+### Recommended Bonus Features by Difficulty
+
+
+**For Teams Finishing Core Features Early (Weeks 8-9):** - Enhanced TCP Synchronization
+(10 pts)
+
+
+  - Advanced Search & Filtering (10 pts)
+
+
+  - User Reviews & Ratings (10 pts)
+
+
+  - Reading Statistics (10 pts)
+
+
+**For Advanced Teams with Extra Time:** - Data Caching with Redis (10 pts)
+
+
+  - Recommendation System (10 pts)
+
+
+  - Friend System (10 pts)
+
+
+  - CI/CD Pipeline (10 pts)
+
+
+**Quick Implementation Bonuses (1-2 days each):** - Notification Preferences (5 pts)
+
+
+  - Multiple Reading Lists (5 pts)
+
+
+  - Health Checks (5 pts)
+
+
+  - Input Sanitization (5 pts)
+
+## Total Maximum Points: 120 points
+
+  - Core Project: 100 points
+
+
+  - Bonus Features: Up to 20 additional points
+
+
+  - Final Grade Calculation: min(Total Points, 100) for the 30% course component
+
+## Success Criteria
+### Minimum Requirements for Passing
+
+  - All five network protocols implemented and functional
+
+
+  - Basic user authentication and authorization
+
+
+  - Manga data storage and retrieval
+
+
+  - Progress tracking and synchronization
+
+
+  - Real-time chat functionality
+
+
+  - Successful live demonstration
+
+### Expected Learning Outcomes
+
+  - Understanding of network programming concepts in Go
+
+
+  - Experience with concurrent programming using goroutines
+
+
+  - Knowledge of different communication protocols and their use cases
+
+
+  - Basic distributed system integration skills
+
+
+  - Foundation for advanced network programming concepts
+
+
+This revised specification provides a challenging but achievable project that maintains
+educational value while fitting realistic time and skill constraints for junior/senior level
+students with limited Go experience.
+## Regulations on AI Chatbot Usage
+
+1. **Permitted Uses**
+
+`o` AI chatbots (e.g., ChatGPT, Gemini, Copilot) may be used for **idea**
+
+**brainstorming, language refinement, grammar checking, and**
+**summarization** .
+
+`o` Students may use AI to **explore programming approaches**, but final
+
+implementation must be their own.
+2. **Prohibited Uses**
+
+
+
+
+`o` Submitting AI-generated code, documentation, or reports **without**
+
+
+
+**meaningful modification** is strictly prohibited.
+
+`o` Using AI to solve entire project tasks or bypass the learning objectives will be
+
+
+
+treated as **academic misconduct** .
+3. **Transparency**
+
+
+
+
+`o` Students must **acknowledge in the report** if AI tools were used, including a
+
+brief description of how they were applied.
+4. **Responsibility**
+
+
+
+
+`o` The student team bears full responsibility for the **accuracy, originality, and**
+
+
+
+**ethical use** of any AI-assisted content.
+
+`o` Any violation of this policy will result in penalties in accordance with the
+
+
+
+university’s academic integrity code.
+
+
+### Examples of Acceptable AI Usage
+
+Students may refer to the following examples as guidance for responsible AI usage:
+
+
+  - **Brainstorming Ideas:** Using AI to suggest potential project structures or
+approaches, then critically evaluating and modifying them.
+
+  - **Language Support:** Asking AI to refine grammar, spelling, or clarity in reports, while
+ensuring the technical content is student-generated.
+
+  - **Summarization:** Using AI to summarize research papers or documentation,
+followed by student verification and deeper reading.
+
+
+  - **Code Assistance:** Requesting AI to explain syntax errors or give pseudocode
+examples, but writing and testing the actual implementation independently.
+
+  - **Learning Aid:** Using AI to clarify complex concepts (e.g., gRPC, concurrency,
+WebSocket handling) as a study guide, not as final deliverables.
+
+
+**Note:** Any AI-generated content must be acknowledged and reviewed by the student.
+Blindly copying AI output into deliverables is not acceptable.
+</file>
+
+<file path="docs/mangahub_usecase (reference) (1).md">
+# MangaHub - Use Case Specification (Revised Scope)
+## 1. Introduction
+### 1.1 Purpose
+This document defines the functional requirements for MangaHub through detailed use
+case specifications. The scope has been adjusted for 12-week implementation by
+junior/senior level students with limited Go experience.
+
+### 1.2 Scope
+MangaHub is a simplified manga tracking system demonstrating network programming
+concepts through practical implementation of TCP, UDP, HTTP, gRPC, and WebSocket
+protocols.
+
+### 1.3 System Overview
+The system provides basic manga tracking, reading progress synchronization, and
+community features while maintaining realistic complexity for academic implementation.
+
+## 2. Actor Definitions
+### 2.1 Primary Actors
+  - **Manga Reader** : End users who track manga reading progress
+  - **Chat User** : Users participating in real-time discussions
+  - **System Administrator** : Staff managing basic system operations
+
+### 2.2 Secondary Actors
+  - **TCP Client** : Applications connecting to sync server
+  - **UDP Client** : Applications receiving notifications
+  - **WebSocket Client** : Browser connections for real-time chat
+  - **External APIs** : MangaDx API for additional manga data
+
+## 3. Core Use Cases
+### 3.1 User Management
+
+_UC-001: User Registration_
+**Primary Actor** : Manga Reader
+**Goal** : Create a new user account
+**Preconditions** : None
+**Postconditions** : User account is created
+
+**Main Success Scenario** : 
+1. User provides username, email, and password
+2. System validates input format and uniqueness
+3. System hashes password using bcrypt
+4. System creates user record in SQLite database
+5. System returns success confirmation
+
+**Alternative Flows** : 
+  - A1: Username already exists - System returns error message
+  - A2: Invalid email format - System requests valid email
+  - A3: Weak password - System displays password requirements
+
+_UC-002: User Authentication_
+
+**Primary Actor** : Manga Reader
+**Goal** : Login to access personalized features
+**Preconditions** : User has valid account
+**Postconditions** : User is authenticated with JWT token
+
+**Main Success Scenario** : 
+1. User provides username/email and password
+2. System validates credentials against database
+3. System generates JWT token with user information
+4. System returns token for subsequent requests
+5. User can access protected endpoints
+
+**Alternative Flows** : 
+  - A1: Invalid credentials - System returns authentication error
+  - A2: Account not found - System suggests registration
+
+### 3.2 Manga Discovery and Management
+
+_UC-003: Search Manga_
+**Primary Actor** : Manga Reader
+**Goal** : Find manga series using search criteria
+**Preconditions** : System has manga database populated
+**Postconditions** : Relevant manga results are displayed
+
+**Main Success Scenario** : 
+1. User enters search query (title or author)
+2. System queries SQLite database using LIKE patterns
+3. System applies basic filters (genre, status) if provided
+4. System returns paginated results with basic information
+5. User can select manga for detailed view
+
+**Alternative Flows** : 
+  - A1: No results found - System displays “no results” message
+  - A2: Database error - System logs error and returns generic message
+
+_UC-004: View Manga Details_
+**Primary Actor** : Manga Reader
+**Goal** : Access detailed information about specific manga
+**Preconditions** : Manga exists in database
+**Postconditions** : Complete manga information is displayed
+
+**Main Success Scenario** : 
+1. User selects manga from search results or direct URL
+2. System retrieves manga details from database
+3. System displays title, author, genres, description, chapter count
+4. System shows user’s current progress if logged in
+5. User can add manga to library or update progress
+
+_UC-005: Add Manga to Library_
+**Primary Actor** : Manga Reader
+**Goal** : Add manga to personal reading library
+**Preconditions** : User is authenticated, manga exists
+**Postconditions** : Manga is added to user’s library
+
+**Main Success Scenario** : 
+1. User clicks “Add to Library” from manga details
+2. System presents status options (Reading, Completed, Plan to Read)
+3. User selects initial status and current chapter
+4. System creates user progress record in database
+5. System confirms addition and updates UI
+
+**Alternative Flows** : - A1: Manga already in library - System offers to update status
+  - A2: Database error - System logs error and shows retry option
+
+_UC-006: Update Reading Progress_
+**Primary Actor** : Manga Reader
+**Goal** : Track current reading progress
+**Preconditions** : Manga is in user’s library
+**Postconditions** : Progress is updated locally and broadcasted
+
+**Main Success Scenario** : 
+1. User updates current chapter number
+2. System validates chapter number against manga metadata
+3. System updates user_progress record with timestamp
+4. System triggers TCP broadcast to connected clients
+5. System confirms update to user
+
+**Alternative Flows** : 
+  - A1: Invalid chapter number - System shows validation error
+  - A2: TCP server unavailable - System updates locally, queues broadcast
+
+### 3.3 Real-time Progress Synchronization
+
+_UC-007: Connect to TCP Sync Server_
+**Primary Actor** : TCP Client
+**Goal** : Establish connection for real-time progress updates
+**Preconditions** : TCP server is running
+**Postconditions** : Client is connected and registered
+
+**Main Success Scenario** : 1. Client initiates TCP connection to server
+2. Server accepts connection and creates goroutine handler
+3. Client sends authentication message with user credentials
+4. Server validates user and adds connection to active list
+5. Server confirms successful registration
+
+**Alternative Flows** : - A1: Authentication fails - Server closes connection
+
+
+  - A2: Server at capacity - Server rejects connection with error
+
+
+_UC-008: Broadcast Progress Update_
+
+
+**Primary Actor** : System (Automated)
+**Secondary Actor** : TCP Client
+**Goal** : Notify connected clients of progress changes
+**Preconditions** : TCP server has active connections
+**Postconditions** : All relevant clients receive update
+
+
+**Main Success Scenario** : 1. System receives progress update from HTTP API
+
+
+2. TCP server receives broadcast message via channel
+
+
+3. Server identifies connections for the specific user
+
+
+4. Server sends JSON progress message to connections
+
+
+5. Clients receive and process update
+
+
+**Alternative Flows** : - A1: Client connection lost - Server removes from active list
+
+
+  - A2: Send fails - Server logs error and continues with other clients
+### 3.4 Notification System
+
+_UC-009: Register for UDP Notifications_
+
+
+**Primary Actor** : UDP Client
+**Goal** : Register to receive chapter release notifications
+**Preconditions** : UDP server is running
+**Postconditions** : Client is registered for notifications
+
+
+**Main Success Scenario** : 1. Client sends UDP registration packet with user preferences
+
+
+2. Server receives registration and extracts client address
+
+
+3. Server adds client to notification list
+
+
+4. Server sends confirmation packet to client
+
+
+5. Client is ready to receive notifications
+
+
+_UC-010: Send Chapter Release Notification_
+
+
+**Primary Actor** : System Administrator
+**Goal** : Notify users about new chapter releases
+**Preconditions** : UDP server has registered clients
+**Postconditions** : Notification is broadcasted to clients
+
+
+**Main Success Scenario** : 1. Administrator triggers notification for specific manga
+
+
+2. System creates notification message with manga details
+
+
+3. UDP server broadcasts message to all registered clients
+
+
+4. Clients receive notification and display to users
+
+
+5. System logs successful broadcast
+
+
+**Alternative Flows** : - A1: Client unreachable - Server continues with other clients
+
+
+  - A2: Network error - Server logs error and retries
+### 3.5 Real-time Chat System
+
+_UC-011: Join Chat_
+
+
+**Primary Actor** : Chat User
+**Goal** : Connect to real-time chat system
+**Preconditions** : User is authenticated, WebSocket server running
+**Postconditions** : User is connected to chat
+
+
+**Main Success Scenario** : 1. User’s browser initiates WebSocket connection
+
+
+2. Server upgrades HTTP connection to WebSocket
+
+
+3. Client sends join message with user credentials
+
+
+4. Server validates user and adds to active connections
+
+
+5. Server broadcasts user join notification to other users
+
+
+6. User receives recent chat history
+
+
+_UC-012: Send Chat Message_
+
+
+**Primary Actor** : Chat User
+**Goal** : Send message to other connected users
+**Preconditions** : User is connected to chat
+**Postconditions** : Message is broadcasted to all users
+
+
+**Main Success Scenario** : 1. User types message and clicks send
+
+
+2. Client sends message via WebSocket connection
+
+
+3. Server receives message and validates user
+
+
+4. Server broadcasts message to all connected clients
+
+
+5. All users receive and display the message
+
+
+**Alternative Flows** : - A1: Message too long - Server returns error to sender
+
+
+  - A2: User not authenticated - Server rejects message
+
+
+_UC-013: Handle User Disconnection_
+
+
+**Primary Actor** : System (Automated)
+**Goal** : Clean up when user leaves chat
+**Preconditions** : User was connected to chat
+**Postconditions** : User is removed from active connections
+
+
+**Main Success Scenario** : 1. System detects WebSocket connection closure
+
+
+2. Server removes connection from active list
+
+
+3. Server broadcasts user leave notification
+
+
+4. Other users see updated participant list
+
+
+5. Connection resources are cleaned up
+
+### 3.6 gRPC Internal Services
+
+_UC-014: Retrieve Manga via gRPC_
+
+
+**Primary Actor** : Internal Service
+**Goal** : Fetch manga data through gRPC interface
+**Preconditions** : gRPC server is running
+**Postconditions** : Manga data is returned
+
+
+**Main Success Scenario** : 1. Client service calls GetManga gRPC method
+
+
+2. gRPC server receives request with manga ID
+
+
+3. Server queries database for manga information
+
+
+4. Server constructs protobuf response message
+
+
+5. Server returns manga data to client
+
+
+_UC-015: Search Manga via gRPC_
+
+
+**Primary Actor** : Internal Service
+**Goal** : Search manga using gRPC interface
+**Preconditions** : gRPC server is running, database populated
+**Postconditions** : Search results are returned
+
+
+**Main Success Scenario** : 1. Client calls SearchManga with search criteria
+
+
+2. gRPC server processes search parameters
+
+
+3. Server executes database query with filters
+
+
+4. Server constructs response with result list
+
+
+5. Server returns paginated results to client
+
+
+_UC-016: Update Progress via gRPC_
+
+
+**Primary Actor** : Internal Service
+**Goal** : Update user reading progress through gRPC
+**Preconditions** : User and manga exist
+**Postconditions** : Progress is updated in database
+
+
+**Main Success Scenario** : 1. Client calls UpdateProgress with user and manga data
+
+
+2. gRPC server validates request parameters
+
+
+3. Server updates user_progress table
+
+
+4. Server triggers TCP broadcast for real-time sync
+
+
+5. Server returns success confirmation
+
+## 4. Bonus Feature Use Cases
+### 4.1 Enhanced Search and Filtering
+
+_UC-017: Advanced Manga Search_
+
+
+**Primary Actor** : Manga Reader
+**Goal** : Search manga with multiple criteria
+**Preconditions** : Advanced search feature is implemented
+**Postconditions** : Filtered results are displayed
+
+
+**Main Success Scenario** : 1. User opens advanced search interface
+
+
+2. User selects genres, status, rating range, and year filters
+
+
+3. System constructs complex database query
+
+
+4. System applies full-text search on titles and descriptions
+
+
+5. System returns ranked results based on relevance
+
+### 4.2 User Reviews and Ratings
+
+_UC-018: Submit Manga Review_
+
+
+**Primary Actor** : Manga Reader
+**Goal** : Write and publish manga review
+**Preconditions** : User has manga in completed list
+**Postconditions** : Review is published
+
+
+**Main Success Scenario** : 1. User navigates to manga and clicks “Write Review”
+
+
+2. User writes review text and assigns rating (1-10)
+
+
+3. System validates review content and rating
+
+
+4. System saves review to database with timestamp
+
+
+5. System displays review on manga page
+
+
+_UC-019: View Manga Reviews_
+
+
+**Primary Actor** : Manga Reader
+**Goal** : Read community reviews for manga
+**Preconditions** : Manga has published reviews
+**Postconditions** : Reviews are displayed
+
+
+**Main Success Scenario** : 1. User views manga details page
+
+
+2. System retrieves all reviews for the manga
+
+
+3. System calculates average rating from all reviews
+
+
+4. System displays reviews sorted by helpfulness or date
+
+
+5. User can read individual reviews and ratings
+
+### 4.3 Friend System
+
+_UC-020: Add Friend_
+
+
+**Primary Actor** : Manga Reader
+**Goal** : Connect with another user as friend
+**Preconditions** : Both users have accounts
+**Postconditions** : Friend relationship is established
+
+
+**Main Success Scenario** : 1. User searches for friend by username
+
+
+2. User sends friend request
+
+
+3. System notifies target user of friend request
+
+
+4. Target user accepts friend request
+
+
+5. System creates bidirectional friend relationship
+
+
+_UC-021: View Friend Activity_
+
+
+**Primary Actor** : Manga Reader
+**Goal** : See reading activity of friends
+**Preconditions** : User has friends
+**Postconditions** : Activity feed is displayed
+
+
+**Main Success Scenario** : 1. User accesses friends activity page
+
+
+2. System retrieves recent activities from friends
+
+
+3. System displays activities (completed manga, reviews, ratings)
+
+
+4. Activities are sorted by recency
+
+
+5. User can click through to view details
+
+### 4.4 Reading Statistics
+
+_UC-022: Generate Reading Statistics_
+
+
+**Primary Actor** : System (Automated)
+**Goal** : Calculate user’s reading statistics
+**Preconditions** : User has reading history
+**Postconditions** : Statistics are computed and cached
+
+
+**Main Success Scenario** : 1. System analyzes user’s reading progress data
+
+
+2. System calculates total chapters read, favorite genres
+
+
+3. System determines reading patterns and trends
+
+
+4. System generates monthly/yearly statistics
+
+
+5. Statistics are cached for performance
+
+
+_UC-023: View Personal Statistics_
+
+
+**Primary Actor** : Manga Reader
+**Goal** : View personal reading analytics
+**Preconditions** : User has reading history
+**Postconditions** : Statistics dashboard is displayed
+
+
+**Main Success Scenario** : 1. User accesses statistics page
+
+
+2. System retrieves cached statistics or generates new ones
+
+
+3. System displays charts and graphs of reading activity
+
+
+4. User can view different time periods and breakdowns
+
+
+5. System shows reading goals progress if set
+
+### 4.5 Caching and Performance
+
+_UC-024: Cache Popular Manga Data_
+
+
+**Primary Actor** : System (Automated)
+**Goal** : Improve performance by caching frequently accessed data
+
+
+**Preconditions** : Redis cache is available
+**Postconditions** : Popular data is cached
+
+
+**Main Success Scenario** : 1. System identifies frequently requested manga
+
+
+2. System stores manga details in Redis cache
+
+
+3. System sets appropriate cache expiration times
+
+
+4. Subsequent requests serve data from cache
+
+
+5. System updates cache when data changes
+
+## 5. Error Handling and Recovery Use Cases
+### 5.1 Database Connection Failure
+
+_UC-025: Handle Database Unavailability_
+
+
+**Goal** : Maintain partial functionality when database is unavailable
+**Trigger** : Database connection fails
+
+
+**Success Criteria** : - Read operations return cached data when available
+
+
+  - Write operations are queued for later processing
+
+
+  - Users receive appropriate error messages
+
+
+  - System attempts automatic reconnection
+
+### 5.2 Network Service Failures
+
+_UC-026: TCP Server Recovery_
+
+
+**Goal** : Recover TCP service after failure
+**Trigger** : TCP server crashes or network issues
+
+
+**Success Criteria** : - Server automatically restarts and listens for connections
+
+
+  - Existing connections are gracefully handled
+
+
+  - Client reconnection is supported
+
+
+  - Progress updates are queued during downtime
+
+
+_UC-027: WebSocket Connection Recovery_
+
+
+**Goal** : Handle WebSocket connection interruptions
+**Trigger** : Network connectivity issues
+
+
+**Success Criteria** : - Client automatically attempts reconnection
+
+
+  - Chat history is preserved during disconnection
+
+
+  - User rejoins chat seamlessly after reconnection
+
+
+  - Other users are notified of connection status
+
+## 6. Performance and Scalability Use Cases
+### 6.1 Load Handling
+
+_UC-028: Support Concurrent Users_
+
+
+**Goal** : Handle multiple simultaneous users effectively
+**Trigger** : 50-100 concurrent users access system
+
+
+**Success Criteria** : - API response times remain under 500ms
+
+
+  - Database queries complete efficiently
+
+
+  - TCP and WebSocket connections remain stable
+
+
+  - No data corruption under concurrent access
+
+
+_UC-029: Efficient Data Retrieval_
+
+
+**Goal** : Optimize database queries for performance
+**Trigger** : Large dataset queries or high request volume
+
+
+**Success Criteria** : - Search queries complete within acceptable time limits
+
+
+  - Pagination prevents memory issues
+
+
+  - Indexes improve query performance
+
+
+  - Connection pooling manages database resources
+
+## 7. Security Use Cases
+### 7.1 Authentication and Authorization
+
+_UC-030: Validate JWT Tokens_
+
+
+**Goal** : Ensure only authenticated users access protected resources
+**Trigger** : Request to protected endpoint
+
+
+**Success Criteria** : - Invalid tokens are rejected
+
+
+  - Expired tokens trigger reauthentication
+
+
+  - Token claims are properly validated
+
+
+  - Unauthorized access is prevented
+
+
+_UC-031: Input Validation_
+
+
+**Goal** : Prevent malicious input from compromising system
+**Trigger** : User input received
+
+
+**Success Criteria** : - SQL injection attempts are blocked
+
+
+  - XSS attempts are sanitized
+
+
+  - Input length limits are enforced
+
+
+  - Invalid data formats are rejected
+
+## 8. Success Metrics and Acceptance Criteria
+### 8.1 Core Functionality Metrics
+
+  - **User Registration** : 100% of valid registrations succeed
+
+
+  - **Authentication** : <100ms token generation time
+
+
+  - **Manga Search** : Results returned within 500ms for 90% of queries
+
+
+  - **Progress Sync** : Updates broadcasted within 1 second
+
+
+  - **Chat Messages** : Real-time delivery within 100ms
+
+### 8.2 Reliability Metrics
+
+  - **System Uptime** : 90% availability during testing period
+
+
+  - **Error Handling** : All error conditions handled gracefully
+
+
+  - **Data Consistency** : 100% accuracy in progress tracking
+
+
+  - **Connection Management** : Proper cleanup of all network connections
+
+### 8.3 Performance Metrics
+
+  - **Concurrent Users** : Support for 50-100 simultaneous users
+
+
+  - **Database Operations** : <200ms for simple queries
+
+
+  - **Memory Usage** : Stable memory consumption under load
+
+
+  - **Network Protocol Efficiency** : Minimal bandwidth usage for sync operations
+
+
+## 9. Implementation Priority (10-12 week)
+### 9.1 Phase 1 (Weeks 1-3): Core HTTP Functionality
+
+  - User registration and authentication
+
+
+  - Basic manga CRUD operations
+
+
+  - Simple search functionality
+
+
+  - Database integration
+
+### 9.2 Phase 2 (Weeks 4-8): Network Protocols
+
+  - TCP progress synchronization
+
+
+  - UDP notification system
+
+
+  - WebSocket real-time chat
+
+
+  - gRPC internal services
+
+### 9.3 Phase 3 (Weeks 9-11): Integration and Polish
+
+  - End-to-end system integration
+
+
+  - Error handling and recovery
+
+
+  - Performance optimization
+
+
+  - Basic testing
+
+### 9.4 Phase 4 (Week 12): Demo and Documentation
+
+  - Live demonstration preparation
+
+
+  - Technical documentation completion
+
+
+  - Final system validation
+
+
+This use case specification provides a comprehensive but realistic foundation for
+implementing MangaHub within the constraints of a 10-12-week academic project while
+maintaining educational value and practical learning outcomes.
+</file>
+
+<file path="go.mod">
+module mangahub
+
+go 1.25.6
+
+require (
+	github.com/bytedance/gopkg v0.1.4 // indirect
+	github.com/bytedance/sonic v1.15.1 // indirect
+	github.com/bytedance/sonic/loader v0.5.1 // indirect
+	github.com/cloudwego/base64x v0.1.7 // indirect
+	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
+	github.com/gin-contrib/sse v1.1.1 // indirect
+	github.com/gin-gonic/gin v1.12.0 // indirect
+	github.com/go-playground/locales v0.14.1 // indirect
+	github.com/go-playground/universal-translator v0.18.1 // indirect
+	github.com/go-playground/validator/v10 v10.30.2 // indirect
+	github.com/goccy/go-json v0.10.6 // indirect
+	github.com/goccy/go-yaml v1.19.2 // indirect
+	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
+	github.com/google/uuid v1.6.0 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
+	github.com/json-iterator/go v1.1.12 // indirect
+	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
+	github.com/leodido/go-urn v1.4.0 // indirect
+	github.com/mattn/go v0.0.0-20171011075504-07f7db3ea99f // indirect
+	github.com/mattn/go-isatty v0.0.22 // indirect
+	github.com/mattn/go-sqlite3 v1.14.44 // indirect
+	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
+	github.com/modern-go/reflect2 v1.0.2 // indirect
+	github.com/pelletier/go-toml/v2 v2.3.1 // indirect
+	github.com/quic-go/qpack v0.6.0 // indirect
+	github.com/quic-go/quic-go v0.59.0 // indirect
+	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
+	github.com/ugorji/go/codec v1.3.1 // indirect
+	go.mongodb.org/mongo-driver/v2 v2.6.0 // indirect
+	golang.org/x/arch v0.26.0 // indirect
+	golang.org/x/crypto v0.50.0 // indirect
+	golang.org/x/net v0.53.0 // indirect
+	golang.org/x/sys v0.43.0 // indirect
+	golang.org/x/text v0.36.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260504160031-60b97b32f348 // indirect
+	google.golang.org/grpc v1.81.0 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
+)
+</file>
+
+<file path="internal/database/schema.sql">
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+CREATE TABLE IF NOT EXISTS manga (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    author TEXT,
+    genres TEXT,
+    status TEXT,
+    total_chapters INTEGER DEFAULT 0,
+    description TEXT
+);
+
+
+CREATE TABLE IF NOT EXISTS user_progress (
+    user_id TEXT,
+    manga_id TEXT,
+    current_chapter INTEGER DEFAULT 0,
+    status TEXT, 
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, manga_id),
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (manga_id) REFERENCES manga(id)
+);
+</file>
+
+<file path="pkg/database/seeder.go">
+package database
+
+import (
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
+	"log"
+	"mangahub/pkg/models"
+)
+
+func SeedData(db *sql.DB) error {
+	// 1. Kiểm tra xem đã có dữ liệu chưa để tránh trùng lặp
+	var count int
+	db.QueryRow("SELECT COUNT(*) FROM manga").Scan(&count)
+	if count > 0 {
+		return nil // Đã có dữ liệu, không cần seed nữa
+	}
+
+	// 2. Đọc file JSON
+	content, err := ioutil.ReadFile("data/manga_seed.json")
+	if err != nil {
+		return err
+	}
+
+	var mangas []models.Manga
+	if err := json.Unmarshal(content, &mangas); err != nil {
+		return err
+	}
+
+	// 3. Insert vào Database
+	for _, m := range mangas {
+		genresJSON, _ := json.Marshal(m.Genres) // Chuyển mảng thành string
+		query := `INSERT INTO manga (id, title, author, genres, status, total_chapters, description) 
+                  VALUES (?, ?, ?, ?, ?, ?, ?)`
+		_, err := db.Exec(query, m.ID, m.Title, m.Author, string(genresJSON), m.Status, m.TotalChapters, m.Description)
+		if err != nil {
+			log.Printf("Lỗi insert %s: %v", m.Title, err)
+		}
+	}
+
+	fmt.Println("✓ Đã nạp dữ liệu mẫu thành công!")
+	return nil
+}
+</file>
+
+<file path="pkg/database/sqlite.go">
+package database
+
+import (
+	"database/sql"
+	"log"
+
+	_ "github.com/mattn/go-sqlite3" // Import driver SQLite
+)
+
+// InitDB khởi tạo kết nối và tạo các bảng cần thiết
+func InitDB(dbPath string) *sql.DB {
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		log.Fatal("Lỗi mở database:", err)
+	}
+
+	// Câu lệnh tạo bảng (Schema)
+	schema := `
+    CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT UNIQUE,
+        password_hash TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS manga (
+        id TEXT PRIMARY KEY,
+        title TEXT,
+        author TEXT,
+        genres TEXT,
+        status TEXT,
+        total_chapters INTEGER,
+        description TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS user_progress (
+        user_id TEXT,
+        manga_id TEXT,
+        current_chapter INTEGER,
+        status TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, manga_id)
+    );`
+
+	_, err = db.Exec(schema)
+	if err != nil {
+		log.Fatal("Lỗi khởi tạo schema:", err)
+	}
+
+	log.Println("Kết nối SQLite thành công và Schema đã sẵn sàng.")
+	return db
+}
+</file>
+
+<file path="pkg/models/manga.go">
+package models
+
+type Manga struct {
+	ID            string   `json:"id" db:"id"`
+	Title         string   `json:"title" db:"title"`
+	Author        string   `json:"author" db:"author"`
+	Genres        []string `json:"genres" db:"genres"`
+	Status        string   `json:"status" db:"status"`
+	TotalChapters int      `json:"total_chapters" db:"total_chapters"`
+	Description   string   `json:"description" db:"description"`
+}
+</file>
+
+<file path="README.md">
+# MangaHub
+MangaHub
+</file>
+
+</files>
