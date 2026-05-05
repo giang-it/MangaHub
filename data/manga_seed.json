@@ -1,0 +1,27 @@
+[
+    {
+        "id": "one-piece",
+        "title": "One Piece",
+        "author": "Oda Eiichiro",
+        "genres": [
+            "Action",
+            "Adventure",
+            "Shounen"
+        ],
+        "status": "ongoing",
+        "total_chapters": 1100,
+        "description": "Monkey D. Luffy explores the Grand Line to become the Pirate King."
+    },
+    {
+        "id": "naruto",
+        "title": "Naruto",
+        "author": "Kishimoto Masashi",
+        "genres": [
+            "Action",
+            "Shounen"
+        ],
+        "status": "completed",
+        "total_chapters": 700,
+        "description": "A young ninja who seeks recognition from his peers."
+    }
+]

@@ -1,0 +1,14 @@
+server:
+  host: "localhost"
+  http_port: 8080
+  tcp_port: 9090
+  udp_port: 9091
+  grpc_port: 9092
+  websocket_port: 9093
+
+database:
+  path: "./data/mangahub.db"
+
+logging:
+  level: "info"
+  path: "./logs/"
