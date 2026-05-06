@@ -199,6 +199,22 @@ Invoke-RestMethod -Uri "http://localhost:8080/users/library" -Method GET
 
 ---
 
+## Bước 7: Data Coverage & Genre Diversity Verification
+# 7.1 Check total manga count (Expected: >30 series)
+.\mangahub.exe manga list
+
+# 7.2 Verify Shounen genre count (Expected: 15-20 entries)
+.\mangahub.exe manga list --genre Shounen
+
+# 7.3 Verify Shoujo genre count (Expected: 15-20 entries)
+.\mangahub.exe manga list --genre Shoujo
+
+# 7.4 Verify Seinen genre count (Expected: 15-20 entries)
+.\mangahub.exe manga list --genre Seinen
+
+# 7.5 Check Metadata integrity (Expected: Full display of Author, Status, and Chapters)
+.\mangahub.exe manga info 20th-century-boys
+
 ## Checklist Tóm Tắt
 
 | Feature | Command Test | Expected |

@@ -19,6 +19,7 @@ import (
 
 	"mangahub/internal/auth"
 	mangaHandler "mangahub/internal/manga"
+	"mangahub/internal/tcp"
 	userHandler "mangahub/internal/user"
 	"mangahub/pkg/database"
 	"mangahub/pkg/models"
@@ -76,12 +77,16 @@ func runServer() {
 	defer db.Close()
 	database.SeedData(db)
 
+	tcpServer := tcp.NewProgressSyncServer("8081")
+	go tcpServer.Start()
+
 	r := gin.Default()
 
 	// Initialize handlers
 	mh := mangaHandler.NewHandler(db)
 	uh := userHandler.NewHandler(db)
 
+	uh.TCPChan = tcpServer.Broadcast
 	// --- AUTHENTICATION ENDPOINTS ---
 	r.POST("/auth/register", func(c *gin.Context) {
 		var req models.AuthRequest

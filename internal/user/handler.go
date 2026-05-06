@@ -6,13 +6,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"mangahub/pkg/models"
+
+	"github.com/gin-gonic/gin"
 )
 
 // Handler holds the database connection for user library operations
 type Handler struct {
-	DB *sql.DB
+	DB      *sql.DB
+	TCPChan chan<- models.ProgressUpdate
 }
 
 // NewHandler creates a new user handler
@@ -184,6 +186,15 @@ func (h *Handler) UpdateProgress(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update progress"})
 		return
+	}
+
+	if h.TCPChan != nil {
+		h.TCPChan <- models.ProgressUpdate{
+			UserID:    userID,
+			MangaID:   req.MangaID,
+			Chapter:   req.Chapter,
+			Timestamp: time.Now().Unix(),
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{

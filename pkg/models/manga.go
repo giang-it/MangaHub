@@ -76,6 +76,13 @@ type ProgressUpdateRequest struct {
 	Chapter int    `json:"chapter" binding:"required"`
 }
 
+type ProgressUpdate struct {
+	UserID    string `json:"user_id"`
+	MangaID   string `json:"manga_id"`
+	Chapter   int    `json:"chapter"`
+	Timestamp int64  `json:"timestamp"`
+}
+
 // LibraryEntry combines manga info with user progress for library display
 type LibraryEntry struct {
 	MangaID        string `json:"manga_id"`
