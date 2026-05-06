@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 	"unicode"
@@ -16,6 +18,8 @@ import (
 	"golang.org/x/term"
 
 	"mangahub/internal/auth"
+	mangaHandler "mangahub/internal/manga"
+	userHandler "mangahub/internal/user"
 	"mangahub/pkg/database"
 	"mangahub/pkg/models"
 )
@@ -74,7 +78,11 @@ func runServer() {
 
 	r := gin.Default()
 
-	// --- CÁC ENDPOINT AUTHENTICATION ---
+	// Initialize handlers
+	mh := mangaHandler.NewHandler(db)
+	uh := userHandler.NewHandler(db)
+
+	// --- AUTHENTICATION ENDPOINTS ---
 	r.POST("/auth/register", func(c *gin.Context) {
 		var req models.AuthRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -116,7 +124,7 @@ func runServer() {
 		c.JSON(http.StatusOK, models.AuthResponse{Token: token})
 	})
 
-	// Middleware xác thực JWT
+	// JWT Middleware
 	authMiddleware := func() gin.HandlerFunc {
 		return func(c *gin.Context) {
 			tokenString := c.GetHeader("Authorization")
@@ -141,6 +149,7 @@ func runServer() {
 		}
 	}
 
+	// --- PROTECTED AUTH ROUTES ---
 	authGroup := r.Group("/auth")
 	authGroup.Use(authMiddleware())
 	{
@@ -190,6 +199,29 @@ func runServer() {
 
 			c.JSON(http.StatusOK, gin.H{"message": "Đổi mật khẩu thành công"})
 		})
+	}
+
+	// --- MANGA CRUD ENDPOINTS ---
+	r.GET("/manga", mh.SearchManga)
+	r.GET("/manga/:id", mh.GetManga)
+
+	mangaAdmin := r.Group("/manga")
+	mangaAdmin.Use(authMiddleware())
+	{
+		mangaAdmin.POST("", mh.CreateManga)
+		mangaAdmin.PUT("/:id", mh.UpdateManga)
+		mangaAdmin.DELETE("/:id", mh.DeleteManga)
+	}
+
+	// --- USER LIBRARY ENDPOINTS ---
+	userGroup := r.Group("/users")
+	userGroup.Use(authMiddleware())
+	{
+		userGroup.POST("/library", uh.AddToLibrary)
+		userGroup.GET("/library", uh.GetLibrary)
+		userGroup.PUT("/library", uh.UpdateLibraryEntry)
+		userGroup.DELETE("/library/:manga_id", uh.RemoveFromLibrary)
+		userGroup.PUT("/progress", uh.UpdateProgress)
 	}
 
 	fmt.Println("Server is running on port 8080...")
@@ -465,11 +497,361 @@ func main() {
 	authCmd.AddCommand(statusCmd)
 	authCmd.AddCommand(changePasswordCmd)
 
+	// --- MANGA CLI COMMANDS ---
+	var mangaCmd = &cobra.Command{
+		Use:   "manga",
+		Short: "Manga Management Commands",
+	}
+
+	var genre, mangaStatus string
+	var searchLimit int
+	var searchCmd2 = &cobra.Command{
+		Use:   "search [query]",
+		Short: "Search for manga",
+		Args:  cobra.MinimumNArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			query := strings.Join(args, " ")
+			fmt.Printf("Searching for \"%s\"...\n\n", query)
+
+			requestURL := fmt.Sprintf("%s/manga?q=%s", apiURL, url.QueryEscape(query))
+			if genre != "" {
+				requestURL += "&genre=" + url.QueryEscape(genre)
+			}
+			if mangaStatus != "" {
+				requestURL += "&status=" + url.QueryEscape(strings.ToLower(mangaStatus))
+			}
+			if searchLimit > 0 {
+				requestURL += fmt.Sprintf("&limit=%d", searchLimit)
+			}
+
+			resp, err := http.Get(requestURL)
+			if err != nil {
+				fmt.Println("✗ Search failed: Server connection error")
+				return
+			}
+			defer resp.Body.Close()
+
+			var result map[string]interface{}
+			json.NewDecoder(resp.Body).Decode(&result)
+
+			results, ok := result["results"].([]interface{})
+			if !ok || len(results) == 0 {
+				fmt.Println("No manga found matching your search criteria.")
+				fmt.Println("\nSuggestions:")
+				fmt.Println("- Check spelling and try again")
+				fmt.Println("- Use broader search terms")
+				fmt.Println("- Browse by genre: mangahub manga search \"\" --genre action")
+				return
+			}
+
+			fmt.Printf("Found %d results:\n\n", len(results))
+			fmt.Printf("%-22s %-28s %-18s %-12s %s\n", "ID", "Title", "Author", "Status", "Chapters")
+			fmt.Println(strings.Repeat("-", 90))
+			for _, r := range results {
+				m := r.(map[string]interface{})
+				chap := int(m["total_chapters"].(float64))
+				fmt.Printf("%-22s %-28s %-18s %-12s %d\n",
+					m["id"], truncate(m["title"].(string), 26),
+					truncate(m["author"].(string), 16), m["status"], chap)
+			}
+			fmt.Println("\nUse 'mangahub manga info <id>' to view details")
+			fmt.Println("Use 'mangahub library add --manga-id <id>' to add to your library")
+		},
+	}
+	searchCmd2.Flags().StringVar(&genre, "genre", "", "Filter by genre")
+	searchCmd2.Flags().StringVar(&mangaStatus, "status", "", "Filter by status")
+	searchCmd2.Flags().IntVar(&searchLimit, "limit", 20, "Max results")
+
+	var mangaInfoCmd = &cobra.Command{
+		Use:   "info [manga-id]",
+		Short: "View manga details",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			mangaID := args[0]
+			resp, err := http.Get(apiURL + "/manga/" + mangaID)
+			if err != nil {
+				fmt.Println("✗ Error: Server connection error")
+				return
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode == http.StatusNotFound {
+				fmt.Printf("✗ Manga not found: '%s'\n\nTry searching instead:\nmangahub manga search \"manga title\"\n", mangaID)
+				return
+			}
+
+			var m map[string]interface{}
+			json.NewDecoder(resp.Body).Decode(&m)
+
+			fmt.Println(strings.Repeat("─", 60))
+			fmt.Printf("  %s\n", strings.ToUpper(m["title"].(string)))
+			fmt.Println(strings.Repeat("─", 60))
+			fmt.Printf("\nBasic Information:\n")
+			fmt.Printf("  ID:       %s\n", m["id"])
+			fmt.Printf("  Title:    %s\n", m["title"])
+			fmt.Printf("  Author:   %s\n", m["author"])
+			if genres, ok := m["genres"].([]interface{}); ok {
+				gs := make([]string, len(genres))
+				for i, g := range genres {
+					gs[i] = g.(string)
+				}
+				fmt.Printf("  Genres:   %s\n", strings.Join(gs, ", "))
+			}
+			fmt.Printf("  Status:   %s\n", m["status"])
+			fmt.Printf("  Chapters: %.0f\n", m["total_chapters"])
+			fmt.Printf("\nDescription:\n  %s\n", m["description"])
+			fmt.Printf("\nActions:\n")
+			fmt.Printf("  Add to library: mangahub library add --manga-id %s --status reading\n", mangaID)
+			fmt.Printf("  Update progress: mangahub progress update --manga-id %s --chapter 1\n", mangaID)
+		},
+	}
+
+	var mangaListCmd = &cobra.Command{
+		Use:   "list",
+		Short: "List all manga in database",
+		Run: func(cmd *cobra.Command, args []string) {
+			listURL := apiURL + "/manga?limit=50"
+			if genre != "" {
+				listURL += "&genre=" + url.QueryEscape(genre)
+			}
+			resp, err := http.Get(listURL)
+			if err != nil {
+				fmt.Println("✗ Error: Server connection error")
+				return
+			}
+			defer resp.Body.Close()
+
+			var result map[string]interface{}
+			json.NewDecoder(resp.Body).Decode(&result)
+
+			results, ok := result["results"].([]interface{})
+			if !ok || len(results) == 0 {
+				fmt.Println("No manga found.")
+				return
+			}
+
+			fmt.Printf("Manga Database (%d entries)\n\n", int(result["total_count"].(float64)))
+			fmt.Printf("%-22s %-28s %-18s %-12s %s\n", "ID", "Title", "Author", "Status", "Chapters")
+			fmt.Println(strings.Repeat("-", 90))
+			for _, r := range results {
+				m := r.(map[string]interface{})
+				fmt.Printf("%-22s %-28s %-18s %-12s %.0f\n",
+					m["id"], truncate(m["title"].(string), 26),
+					truncate(m["author"].(string), 16), m["status"], m["total_chapters"])
+			}
+		},
+	}
+	mangaListCmd.Flags().StringVar(&genre, "genre", "", "Filter by genre")
+
+	mangaCmd.AddCommand(searchCmd2)
+	mangaCmd.AddCommand(mangaInfoCmd)
+	mangaCmd.AddCommand(mangaListCmd)
+
+	// --- LIBRARY CLI COMMANDS ---
+	var libraryCmd = &cobra.Command{
+		Use:   "library",
+		Short: "Library Operations",
+	}
+
+	var mangaID, libStatus string
+	var libAddCmd = &cobra.Command{
+		Use:   "add",
+		Short: "Add manga to library",
+		Run: func(cmd *cobra.Command, args []string) {
+			token := getToken()
+			if token == "" {
+				fmt.Println("Not logged in. Please login first.")
+				return
+			}
+
+			reqBody, _ := json.Marshal(map[string]interface{}{
+				"manga_id": mangaID,
+				"status":   libStatus,
+			})
+
+			req, _ := http.NewRequest("POST", apiURL+"/users/library", bytes.NewBuffer(reqBody))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+token)
+
+			client := &http.Client{}
+			resp, err := client.Do(req)
+			if err != nil {
+				fmt.Println("✗ Error: Server connection error")
+				return
+			}
+			defer resp.Body.Close()
+
+			var result map[string]interface{}
+			json.NewDecoder(resp.Body).Decode(&result)
+
+			if resp.StatusCode != http.StatusCreated {
+				fmt.Printf("✗ Failed to add: %v\n", result["error"])
+				return
+			}
+
+			fmt.Println("✓ Manga added to library!")
+			fmt.Printf("  Manga: %v\n", result["title"])
+			fmt.Printf("  Status: %v\n", result["status"])
+		},
+	}
+	libAddCmd.Flags().StringVar(&mangaID, "manga-id", "", "Manga ID")
+	libAddCmd.Flags().StringVar(&libStatus, "status", "reading", "Status (reading, completed, plan-to-read)")
+	libAddCmd.MarkFlagRequired("manga-id")
+
+	var libListCmd = &cobra.Command{
+		Use:   "list",
+		Short: "View your library",
+		Run: func(cmd *cobra.Command, args []string) {
+			token := getToken()
+			if token == "" {
+				fmt.Println("Not logged in. Please login first.")
+				return
+			}
+
+			url := apiURL + "/users/library"
+			if libStatus != "" {
+				url += "?status=" + libStatus
+			}
+
+			req, _ := http.NewRequest("GET", url, nil)
+			req.Header.Set("Authorization", "Bearer "+token)
+
+			client := &http.Client{}
+			resp, err := client.Do(req)
+			if err != nil {
+				fmt.Println("✗ Error: Server connection error")
+				return
+			}
+			defer resp.Body.Close()
+
+			var result map[string]interface{}
+			json.NewDecoder(resp.Body).Decode(&result)
+
+			entries, ok := result["entries"].([]interface{})
+			if !ok || len(entries) == 0 {
+				fmt.Println("Your library is empty.\n\nGet started:")
+				fmt.Println("  mangahub manga search \"your favorite series\"")
+				fmt.Println("  mangahub library add --manga-id <id> --status reading")
+				return
+			}
+
+			fmt.Printf("Your Manga Library (%d entries)\n\n", int(result["total_count"].(float64)))
+			fmt.Printf("%-20s %-26s %-12s %-14s %s\n", "ID", "Title", "Chapter", "Status", "Updated")
+			fmt.Println(strings.Repeat("-", 85))
+			for _, e := range entries {
+				entry := e.(map[string]interface{})
+				cur := int(entry["current_chapter"].(float64))
+				total := int(entry["total_chapters"].(float64))
+				fmt.Printf("%-20s %-26s %4d/%-6d %-14s %s\n",
+					entry["manga_id"], truncate(entry["title"].(string), 24),
+					cur, total, entry["status"], entry["updated_at"])
+			}
+		},
+	}
+	libListCmd.Flags().StringVar(&libStatus, "status", "", "Filter by status")
+
+	var libRemoveCmd = &cobra.Command{
+		Use:   "remove",
+		Short: "Remove manga from library",
+		Run: func(cmd *cobra.Command, args []string) {
+			token := getToken()
+			if token == "" {
+				fmt.Println("Not logged in.")
+				return
+			}
+
+			req, _ := http.NewRequest("DELETE", apiURL+"/users/library/"+mangaID, nil)
+			req.Header.Set("Authorization", "Bearer "+token)
+
+			client := &http.Client{}
+			resp, err := client.Do(req)
+			if err != nil {
+				fmt.Println("✗ Error: Server connection error")
+				return
+			}
+			defer resp.Body.Close()
+
+			var result map[string]interface{}
+			json.NewDecoder(resp.Body).Decode(&result)
+
+			if resp.StatusCode != http.StatusOK {
+				fmt.Printf("✗ Remove failed: %v\n", result["error"])
+				return
+			}
+			fmt.Println("✓ Manga removed from library")
+		},
+	}
+	libRemoveCmd.Flags().StringVar(&mangaID, "manga-id", "", "Manga ID")
+	libRemoveCmd.MarkFlagRequired("manga-id")
+
+	libraryCmd.AddCommand(libAddCmd)
+	libraryCmd.AddCommand(libListCmd)
+	libraryCmd.AddCommand(libRemoveCmd)
+
+	// --- PROGRESS CLI COMMANDS ---
+	var progressCmd = &cobra.Command{
+		Use:   "progress",
+		Short: "Progress Tracking",
+	}
+
+	var chapter int
+	var progressUpdateCmd = &cobra.Command{
+		Use:   "update",
+		Short: "Update reading progress",
+		Run: func(cmd *cobra.Command, args []string) {
+			token := getToken()
+			if token == "" {
+				fmt.Println("Not logged in.")
+				return
+			}
+
+			reqBody, _ := json.Marshal(map[string]interface{}{
+				"manga_id": mangaID,
+				"chapter":  chapter,
+			})
+
+			req, _ := http.NewRequest("PUT", apiURL+"/users/progress", bytes.NewBuffer(reqBody))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+token)
+
+			client := &http.Client{}
+			resp, err := client.Do(req)
+			if err != nil {
+				fmt.Println("✗ Error: Server connection error")
+				return
+			}
+			defer resp.Body.Close()
+
+			var result map[string]interface{}
+			json.NewDecoder(resp.Body).Decode(&result)
+
+			if resp.StatusCode != http.StatusOK {
+				fmt.Printf("✗ Progress update failed: %v\n", result["error"])
+				return
+			}
+
+			fmt.Println("✓ Progress updated successfully!")
+			fmt.Printf("  Manga: %v\n", result["manga"])
+			fmt.Printf("  Previous: Chapter %v\n", result["previous_chapter"])
+			fmt.Printf("  Current:  Chapter %v\n", result["current_chapter"])
+			fmt.Printf("  Status:   %v\n", result["status"])
+		},
+	}
+	progressUpdateCmd.Flags().StringVar(&mangaID, "manga-id", "", "Manga ID")
+	progressUpdateCmd.Flags().IntVar(&chapter, "chapter", 0, "Chapter number")
+	progressUpdateCmd.MarkFlagRequired("manga-id")
+	progressUpdateCmd.MarkFlagRequired("chapter")
+
+	progressCmd.AddCommand(progressUpdateCmd)
+
 	rootCmd.AddCommand(serverCmd)
 	rootCmd.AddCommand(authCmd)
+	rootCmd.AddCommand(mangaCmd)
+	rootCmd.AddCommand(libraryCmd)
+	rootCmd.AddCommand(progressCmd)
 
 	if len(os.Args) == 1 {
-		// Run server by default if no arguments are provided, like a traditional api-server
+		// Run server by default if no arguments are provided
 		runServer()
 		return
 	}
@@ -478,4 +860,12 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
+}
+
+// truncate shortens a string to maxLen with "..." if needed
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
 }
