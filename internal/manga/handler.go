@@ -3,11 +3,13 @@ package manga
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
-	"github.com/gin-gonic/gin"
 	"mangahub/pkg/models"
+
+	"github.com/gin-gonic/gin"
 )
 
 // Handler holds the database connection for manga operations
@@ -251,4 +253,57 @@ func (h *Handler) DeleteManga(c *gin.Context) {
 	h.DB.Exec("DELETE FROM user_progress WHERE manga_id = ?", mangaID)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Manga deleted successfully"})
+}
+
+func (h *Handler) SyncFromExternalAPI(limit int) (int, error) {
+	apiURL := fmt.Sprintf("https://api.mangadex.org/manga?limit=%d&includes[]=author", limit)
+	resp, err := http.Get(apiURL)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	var data struct {
+		Data []struct {
+			ID         string `json:"id"`
+			Attributes struct {
+				Title struct {
+					En string `json:"en"`
+				} `json:"title"`
+				Status      string `json:"status"`
+				Description struct {
+					En string `json:"en"`
+				} `json:"description"`
+				LastChapter string `json:"lastChapter"`
+			} `json:"attributes"`
+		} `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return 0, err
+	}
+
+	count := 0
+	for _, item := range data.Data {
+		// Chuyển đổi dữ liệu từ MangaDex sang model của dự án
+		m := models.Manga{
+			ID:          item.ID,
+			Title:       item.Attributes.Title.En,
+			Author:      "MangaDex Contributor", // MangaDex cần gọi thêm để lấy tên author cụ thể
+			Status:      item.Attributes.Status,
+			Description: item.Attributes.Description.En,
+			Genres:      []string{"Imported"}, // Bạn có thể map genre cụ thể sau
+		}
+
+		// Lưu vào database sử dụng logic INSERT OR IGNORE
+		genresJSON, _ := json.Marshal(m.Genres)
+		_, err := h.DB.Exec(
+			"INSERT OR IGNORE INTO manga (id, title, author, genres, status, description) VALUES (?, ?, ?, ?, ?, ?)",
+			m.ID, m.Title, m.Author, string(genresJSON), m.Status, m.Description,
+		)
+		if err == nil {
+			count++
+		}
+	}
+	return count, nil
 }
