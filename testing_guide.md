@@ -215,6 +215,24 @@ Invoke-RestMethod -Uri "http://localhost:8080/users/library" -Method GET
 # 7.5 Check Metadata integrity (Expected: Full display of Author, Status, and Chapters)
 .\mangahub.exe manga info 20th-century-boys
 
+## Bước 8: TCP Real-time Progress Sync Verification
+# 8.1 Open two terminal tabs (First tab to run server, second tab to login or register account)
+Tab1: .\mangahub.exe server start
+Tab2: 
+.\mangahub.exe auth register --username TienAnh --email anh@test.com
+.\mangahub.exe auth login --username TienAnh
+
+# 8.2 Prepare Library Data
+.\mangahub.exe library add --manga-id one-piece --status reading
+
+# 8.3 Execution and Broadcasting(The Trigger)
+.\mangahub.exe progress update --manga-id one-piece --chapter 1100
+
+# 8.4 Expected Results & Verification
+CLI Result: ✓ Progress updated successfully! appears in Tab #4.
+TCP Result: BOTH Tab #2 and Tab #3 instantly receive the JSON payload.
+Data Check: JSON contains correct user_id, manga_id, and chapter: 1100.
+
 ## Checklist Tóm Tắt
 
 | Feature | Command Test | Expected |
