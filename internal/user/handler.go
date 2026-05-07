@@ -2,6 +2,7 @@ package user
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -194,6 +195,19 @@ func (h *Handler) UpdateProgress(c *gin.Context) {
 			MangaID:   req.MangaID,
 			Chapter:   req.Chapter,
 			Timestamp: time.Now().Unix(),
+		}
+	}
+
+	if _, err := h.DB.Exec("UPDATE...", userID, req.MangaID, req.Chapter); err == nil {
+		// Chỉ gửi qua TCP nếu DB thành công
+		if h.TCPChan != nil {
+			h.TCPChan <- models.ProgressUpdate{
+				UserID:    userID,
+				MangaID:   req.MangaID,
+				Chapter:   req.Chapter,
+				Timestamp: time.Now().Unix(),
+			}
+			fmt.Printf("[API-TCP] Dispatched update for User %s\n", userID)
 		}
 	}
 

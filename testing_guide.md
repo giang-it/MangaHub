@@ -233,6 +233,38 @@ CLI Result: ✓ Progress updated successfully! appears in Tab #4.
 TCP Result: BOTH Tab #2 and Tab #3 instantly receive the JSON payload.
 Data Check: JSON contains correct user_id, manga_id, and chapter: 1100.
 
+## Bước 9: Advanced Integration & Error Handling
+# 9.1 Connection Logging Test
+  Terminal 1: Running Server - Connect Terminal 2 and 3 using TCP Listener script
+  # Run this script for Terminal 2 and 3:
+  $c = New-Object System.Net.Sockets.TcpClient("localhost", 8081); 
+  $s = $c.GetStream(); 
+  $r = New-Object System.IO.StreamReader($s); 
+  Write-Host "--- Waiting for TCP Data... ---" -ForegroundColor Green; 
+    while($c.Connected){ 
+    if($s.DataAvailable){ 
+        $line = $r.ReadLine(); 
+        if($line){ Write-Host "RECEIVED: $line" -ForegroundColor Yellow } 
+    }
+    Start-Sleep -Milliseconds 200
+  }
+
+  Expected Result: Terminal #1 (Server) logs: `[TCP] New client connected`
+
+# 9.2 Integration Dispatch Test
+    Run `progress update` in Terminal #4.
+  Expected Result: 
+    1. Terminal #1 logs: `[API-TCP] Dispatched update for User...`
+    2. Terminal #2 & #3 instantly show the JSON data.
+
+# 9.3 Fault Tolerance Test (Error Handling)
+    1. Close Terminal #2 abruptly.
+    2. Run `progress update` again in Terminal #4.
+  Expected Result:
+    1. Terminal #1 logs: `[TCP] Client disconnected: [::1]:....
+    2. Terminal #3 (still open) continues to receive JSON without issues.
+    3. The server DOES NOT crash or hang.
+
 ## Checklist Tóm Tắt
 
 | Feature | Command Test | Expected |

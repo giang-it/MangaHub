@@ -1,7 +1,6 @@
 package tcp
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"mangahub/pkg/models"
@@ -41,40 +40,46 @@ func (s *ProgressSyncServer) Start() {
 		if err != nil {
 			continue
 		}
-		// Xử lý mỗi kết nối mới bằng một Goroutine riêng
 		go s.handleConnection(conn)
 	}
 }
 
 func (s *ProgressSyncServer) handleConnection(conn net.Conn) {
 	addr := conn.RemoteAddr().String()
+	defer func() {
+		s.Mu.Lock()
+		delete(s.Clients, addr)
+		s.Mu.Unlock()
+		conn.Close()
+		fmt.Printf("[TCP] Cleaned up connection for: %s\n", addr)
+	}()
+
 	s.Mu.Lock()
 	s.Clients[addr] = conn
 	s.Mu.Unlock()
 
 	fmt.Printf("[TCP] New client connected: %s\n", addr)
 
-	// Giữ kết nối mở để lắng nghe hoặc đợi đóng
-	scanner := bufio.NewScanner(conn)
-	for scanner.Scan() {
-		// Ở đây bạn có thể thêm logic nếu client muốn gửi tin ngược lại
-	}
+	buffer := make([]byte, 1024)
+	for {
+		_, err := conn.Read(buffer)
+		if err != nil {
 
-	// Xử lý khi ngắt kết nối
-	s.Mu.Lock()
-	delete(s.Clients, addr)
-	s.Mu.Unlock()
-	conn.Close()
-	fmt.Printf("[TCP] Client disconnected: %s\n", addr)
+			return
+		}
+	}
 }
 
 func (s *ProgressSyncServer) handleBroadcast() {
 	for update := range s.Broadcast {
 		msg, _ := json.Marshal(update)
+		payload := append(msg, '\n')
+
 		s.Mu.Lock()
 		for addr, conn := range s.Clients {
-			_, err := fmt.Fprintf(conn, string(msg)+"\n")
+			_, err := conn.Write(payload)
 			if err != nil {
+				fmt.Printf("[TCP] Failed to send to %s: %v\n", addr, err)
 				conn.Close()
 				delete(s.Clients, addr)
 			}
