@@ -1,38 +1,37 @@
 package tcp
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"log"
 	"mangahub/pkg/models"
 	"net"
 	"sync"
 )
 
 type ProgressSyncServer struct {
-	Port      string
-	Clients   map[string]net.Conn
-	Mu        sync.Mutex
-	Broadcast chan models.ProgressUpdate
+	Port          string
+	connections   map[string][]net.Conn
+	mu            sync.Mutex
+	BroadcastChan chan models.ProgressUpdate
 }
 
-func NewProgressSyncServer(port string) *ProgressSyncServer {
+func NewProgressSyncServer(port string, broadcastChan chan models.ProgressUpdate) *ProgressSyncServer {
 	return &ProgressSyncServer{
-		Port:      port,
-		Clients:   make(map[string]net.Conn),
-		Broadcast: make(chan models.ProgressUpdate),
+		Port:          port,
+		connections:   make(map[string][]net.Conn),
+		BroadcastChan: broadcastChan,
 	}
 }
 
 func (s *ProgressSyncServer) Start() {
 	listener, err := net.Listen("tcp", ":"+s.Port)
 	if err != nil {
-		fmt.Printf("TCP Error: %v\n", err)
-		return
+		log.Fatalf("TCP Server error: %v", err)
 	}
+	fmt.Printf("TCP Sync Server listening on tcp://localhost:%s\n", s.Port)
 
-	fmt.Printf("TCP Sync Server is running on port %s...\n", s.Port)
-
-	// Chạy Goroutine để xử lý việc gửi tin nhắn tới mọi người
 	go s.handleBroadcast()
 
 	for {
@@ -45,45 +44,57 @@ func (s *ProgressSyncServer) Start() {
 }
 
 func (s *ProgressSyncServer) handleConnection(conn net.Conn) {
-	addr := conn.RemoteAddr().String()
-	defer func() {
-		s.Mu.Lock()
-		delete(s.Clients, addr)
-		s.Mu.Unlock()
-		conn.Close()
-		fmt.Printf("[TCP] Cleaned up connection for: %s\n", addr)
-	}()
+	defer conn.Close()
 
-	s.Mu.Lock()
-	s.Clients[addr] = conn
-	s.Mu.Unlock()
+	// Đọc UserID từ client khi mới kết nối
+	reader := bufio.NewReader(conn)
+	authLine, err := reader.ReadString('\n')
+	if err != nil {
+		return
+	}
 
-	fmt.Printf("[TCP] New client connected: %s\n", addr)
+	var authReq struct {
+		UserID string `json:"user_id"`
+	}
+	if err := json.Unmarshal([]byte(authLine), &authReq); err != nil {
+		return
+	}
 
-	buffer := make([]byte, 1024)
+	s.mu.Lock()
+	s.connections[authReq.UserID] = append(s.connections[authReq.UserID], conn)
+	s.mu.Unlock()
+
+	// Giữ connection mở
 	for {
-		_, err := conn.Read(buffer)
+		_, err := reader.ReadString('\n')
 		if err != nil {
-
-			return
+			break
 		}
 	}
+
+	// Xóa connection khi client ngắt kết nối
+	s.mu.Lock()
+	conns := s.connections[authReq.UserID]
+	for i, c := range conns {
+		if c == conn {
+			s.connections[authReq.UserID] = append(conns[:i], conns[i+1:]...)
+			break
+		}
+	}
+	s.mu.Unlock()
 }
 
 func (s *ProgressSyncServer) handleBroadcast() {
-	for update := range s.Broadcast {
-		msg, _ := json.Marshal(update)
-		payload := append(msg, '\n')
-
-		s.Mu.Lock()
-		for addr, conn := range s.Clients {
-			_, err := conn.Write(payload)
-			if err != nil {
-				fmt.Printf("[TCP] Failed to send to %s: %v\n", addr, err)
-				conn.Close()
-				delete(s.Clients, addr)
+	for update := range s.BroadcastChan {
+		s.mu.Lock()
+		conns, exists := s.connections[update.UserID]
+		if exists {
+			data, _ := json.Marshal(update)
+			data = append(data, '\n')
+			for _, conn := range conns {
+				conn.Write(data)
 			}
 		}
-		s.Mu.Unlock()
+		s.mu.Unlock()
 	}
 }

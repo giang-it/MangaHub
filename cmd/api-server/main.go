@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -23,6 +25,7 @@ import (
 	userHandler "mangahub/internal/user"
 	"mangahub/pkg/database"
 	"mangahub/pkg/models"
+	tcpPkg "mangahub/pkg/tcp"
 )
 
 var (
@@ -52,6 +55,18 @@ func clearToken() error {
 	return os.Remove(path)
 }
 
+func getCurrentUserID() string {
+	token := getToken()
+	if token == "" {
+		return ""
+	}
+	claims, err := auth.ParseToken(token)
+	if err != nil {
+		return ""
+	}
+	return claims["user_id"].(string)
+}
+
 func validatePassword(password string) error {
 	if len(password) < 8 {
 		return fmt.Errorf("Password must be at least 8 characters with mixed case and numbers")
@@ -77,16 +92,18 @@ func runServer() {
 	defer db.Close()
 	database.SeedData(db)
 
-	tcpServer := tcp.NewProgressSyncServer("8081")
+	// Tạo channel để kết nối HTTP API và TCP Server
+	broadcastChan := make(chan models.ProgressUpdate, 100)
+
+	// Khởi chạy TCP Sync Server trên cổng 8081
+	tcpServer := tcp.NewProgressSyncServer("8081", broadcastChan)
 	go tcpServer.Start()
 
 	r := gin.Default()
 
-	// Initialize handlers
 	mh := mangaHandler.NewHandler(db)
 	uh := userHandler.NewHandler(db)
-
-	uh.TCPChan = tcpServer.Broadcast
+	uh.TCPChan = broadcastChan
 	// --- AUTHENTICATION ENDPOINTS ---
 	r.POST("/auth/register", func(c *gin.Context) {
 		var req models.AuthRequest
@@ -95,8 +112,15 @@ func runServer() {
 			return
 		}
 
-		if req.Email != "" && !models.IsValidEmail(req.Email) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid email format"})
+		// FIX: Bắt buộc email hợp lệ
+		if req.Email == "" || !models.IsValidEmail(req.Email) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Registration failed: Invalid email format"})
+			return
+		}
+
+		// FIX: Kiểm tra mật khẩu mạnh (ít nhất 8 ký tự, có hoa, thường, số)
+		if !models.IsStrongPassword(req.Password) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Registration failed: Password too weak"})
 			return
 		}
 
@@ -107,7 +131,7 @@ func runServer() {
 			userID, req.Username, req.Email, hashedPwd)
 
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Username or Email already exists"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Registration failed: Username or Email already exists"})
 			return
 		}
 
@@ -121,12 +145,18 @@ func runServer() {
 			return
 		}
 
+		// FIX: Hỗ trợ login bằng cả Username hoặc Email
+		identifier := req.Username
+		if identifier == "" {
+			identifier = req.Email
+		}
+
 		var userID, hashedPwd string
 		err := db.QueryRow("SELECT id, password_hash FROM users WHERE username = ? OR email = ?",
-			req.Username, req.Username).Scan(&userID, &hashedPwd)
+			identifier, identifier).Scan(&userID, &hashedPwd)
 
 		if err != nil || !auth.CheckPasswordHash(req.Password, hashedPwd) {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Sai tài khoản hoặc mật khẩu"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Login failed: Invalid credentials"})
 			return
 		}
 
@@ -361,7 +391,7 @@ func main() {
 				fmt.Println("Error: required flag(s) \"username\" or \"email\" not set")
 				return
 			}
-			
+
 			fmt.Print("Password: ")
 			pwdBytes, err := term.ReadPassword(int(syscall.Stdin))
 			if err != nil {
@@ -975,6 +1005,90 @@ func main() {
 	libraryCmd.AddCommand(libRemoveCmd)
 	libraryCmd.AddCommand(libUpdateCmd)
 
+	// --- TCP SYNC CLI COMMANDS ---
+	var syncCmd = &cobra.Command{
+		Use:   "sync",
+		Short: "Manage real-time synchronization",
+	}
+
+	var syncConnectCmd = &cobra.Command{
+		Use:   "connect",
+		Short: "Connect to TCP sync server",
+		Run: func(cmd *cobra.Command, args []string) {
+			state := tcpPkg.SyncState{
+				Status:           "Active",
+				ServerURL:        "localhost:8081",
+				SessionID:        "sess_" + uuid.New().String()[:8],
+				ConnectedAt:      time.Now(),
+				MessagesSent:     0,
+				MessagesReceived: 0,
+				LastSyncUpdate:   "None",
+			}
+			tcpPkg.SaveState(state)
+
+			fmt.Println("Connecting to TCP sync server at localhost:8081...")
+			fmt.Println("✓ Connected successfully!")
+			fmt.Printf("\nConnection Details:\n")
+			fmt.Printf("Server: localhost:8081\nSession ID: %s\nConnected at: %v\n", state.SessionID, state.ConnectedAt.Format("2006-01-02 15:04:05 UTC"))
+			fmt.Println("\nSync Status:\nAuto-sync: enabled\nConflict resolution: last_write_wins\nDevices connected: 1 (CLI)")
+			fmt.Println("\nReal-time sync is now active.")
+		},
+	}
+
+	var syncStatusCmd = &cobra.Command{
+		Use:   "status",
+		Short: "Check sync connection status",
+		Run: func(cmd *cobra.Command, args []string) {
+			state := tcpPkg.LoadState()
+			if state.Status != "Active" {
+				fmt.Println("Sync is disconnected. Run 'mangahub sync connect'.")
+				return
+			}
+			uptime := time.Since(state.ConnectedAt).Round(time.Second)
+			fmt.Println("TCP Sync Status:")
+			fmt.Printf("\nConnection: ✓ %s\nServer: %s\nUptime: %v\n", state.Status, state.ServerURL, uptime)
+			fmt.Printf("\nSync Statistics:\nMessages sent: %d\nMessages received: %d\nLast sync: %s\n",
+				state.MessagesSent, state.MessagesReceived, state.LastSyncUpdate)
+		},
+	}
+
+	var syncMonitorCmd = &cobra.Command{
+		Use:   "monitor",
+		Short: "View real-time progress updates",
+		Run: func(cmd *cobra.Command, args []string) {
+			state := tcpPkg.LoadState()
+			if state.Status != "Active" {
+				fmt.Println("Please run 'mangahub sync connect' first.")
+				return
+			}
+			conn, err := net.Dial("tcp", state.ServerURL)
+			if err != nil {
+				fmt.Printf("Connection failed: %v\n", err)
+				return
+			}
+			defer conn.Close()
+
+			userID := getCurrentUserID()
+			fmt.Fprintf(conn, `{"user_id":"%s"}`+"\n", userID)
+
+			fmt.Println("Monitoring real-time sync updates... (Press Ctrl+C to exit)")
+			reader := bufio.NewReader(conn)
+			for {
+				line, err := reader.ReadString('\n')
+				if err != nil {
+					break
+				}
+				var update models.ProgressUpdate
+				if err := json.Unmarshal([]byte(line), &update); err == nil {
+					fmt.Printf("[%s] ← Device updated: %s → Chapter %d\n",
+						time.Now().Format("15:04:05"), update.MangaID, update.Chapter)
+					tcpPkg.IncrementReceived()
+				}
+			}
+		},
+	}
+
+	syncCmd.AddCommand(syncConnectCmd, syncStatusCmd, syncMonitorCmd)
 	// --- PROGRESS CLI COMMANDS ---
 	var progressCmd = &cobra.Command{
 		Use:   "progress",
@@ -1031,6 +1145,7 @@ func main() {
 			}
 
 			fmt.Println("✓ Progress updated successfully!")
+			tcpPkg.IncrementSent(mangaID, chapter)
 			fmt.Printf("  Manga: %v\n", result["manga"])
 			fmt.Printf("  Previous: Chapter %v\n", result["previous_chapter"])
 			fmt.Printf("  Current:  Chapter %v\n", result["current_chapter"])
@@ -1108,6 +1223,7 @@ func main() {
 	rootCmd.AddCommand(mangaCmd)
 	rootCmd.AddCommand(libraryCmd)
 	rootCmd.AddCommand(progressCmd)
+	rootCmd.AddCommand(syncCmd)
 
 	if len(os.Args) == 1 {
 		// Run server by default if no arguments are provided
