@@ -14,13 +14,14 @@ type User struct {
 	CreatedAt    time.Time `json:"created_at" db:"created_at"`
 }
 
-// internal/api/validator.go
-func isValidEmail(email string) bool {
-	re := regexp.MustCompile(`^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,4}$`)
+// IsValidEmail checks if email format is valid
+func IsValidEmail(email string) bool {
+	re := regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,4}$`)
 	return re.MatchString(email)
 }
 
-func isStrongPassword(password string) bool {
+// IsStrongPassword checks password strength
+func IsStrongPassword(password string) bool {
 	var hasUpper, hasLower, hasNumber bool
 	if len(password) < 8 {
 		return false
@@ -39,7 +40,8 @@ func isStrongPassword(password string) bool {
 }
 
 type AuthRequest struct {
-	Username string `json:"username" binding:"required"`
+	Username string `json:"username"`
+	Email    string `json:"email"`
 	Password string `json:"password" binding:"required"`
 }
 

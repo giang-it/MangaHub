@@ -106,7 +106,22 @@ func (h *Handler) GetLibrary(c *gin.Context) {
 	var totalCount int
 	h.DB.QueryRow(countQuery, args...).Scan(&totalCount)
 
-	query += " ORDER BY up.updated_at DESC LIMIT ? OFFSET ?"
+	sortByParam := c.Query("sort_by")
+	orderParam := c.Query("order")
+
+	sortCol := "up.updated_at"
+	if sortByParam == "title" {
+		sortCol = "m.title"
+	} else if sortByParam == "last-updated" {
+		sortCol = "up.updated_at"
+	}
+
+	sortOrder := "DESC"
+	if strings.ToUpper(orderParam) == "ASC" {
+		sortOrder = "ASC"
+	}
+
+	query += fmt.Sprintf(" ORDER BY %s %s LIMIT ? OFFSET ?", sortCol, sortOrder)
 	queryArgs := append(args, limit, (page-1)*limit)
 
 	rows, err := h.DB.Query(query, queryArgs...)

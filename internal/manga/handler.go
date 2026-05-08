@@ -67,7 +67,21 @@ func (h *Handler) SearchManga(c *gin.Context) {
 	var totalCount int
 	h.DB.QueryRow(countQuery, args...).Scan(&totalCount)
 
-	query += " ORDER BY title ASC LIMIT ? OFFSET ?"
+	sortBy := "title"
+	if params.SortBy == "title" {
+		sortBy = "title"
+	} else if params.SortBy == "status" {
+		sortBy = "status"
+	} else if params.SortBy == "author" {
+		sortBy = "author"
+	}
+
+	order := "ASC"
+	if strings.ToUpper(params.Order) == "DESC" {
+		order = "DESC"
+	}
+
+	query += fmt.Sprintf(" ORDER BY %s %s LIMIT ? OFFSET ?", sortBy, order)
 	queryArgs := append(args, params.Limit, offset)
 
 	rows, err := h.DB.Query(query, queryArgs...)

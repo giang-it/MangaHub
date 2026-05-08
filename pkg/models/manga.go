@@ -45,6 +45,8 @@ type MangaSearchParams struct {
 	Author string `form:"author"`
 	Page   int    `form:"page"`
 	Limit  int    `form:"limit"`
+	SortBy string `form:"sort_by"`
+	Order  string `form:"order"`
 }
 
 // UserProgress represents a user's reading progress for a manga

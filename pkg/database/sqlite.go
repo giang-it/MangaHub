@@ -23,6 +23,7 @@ func InitDB(dbPath string) *sql.DB {
     CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
         username TEXT UNIQUE,
+        email TEXT UNIQUE,
         password_hash TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
@@ -64,6 +65,7 @@ func InitDB(dbPath string) *sql.DB {
 	db.Exec("ALTER TABLE user_progress ADD COLUMN current_volume INTEGER DEFAULT 0")
 	db.Exec("ALTER TABLE user_progress ADD COLUMN rating INTEGER DEFAULT 0")
 	db.Exec("ALTER TABLE user_progress ADD COLUMN notes TEXT DEFAULT ''")
+	db.Exec("ALTER TABLE users ADD COLUMN email TEXT")
 
 	log.Println("Kết nối SQLite thành công và Schema đã sẵn sàng.")
 	return db
