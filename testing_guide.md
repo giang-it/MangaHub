@@ -196,9 +196,84 @@ Invoke-RestMethod -Uri "http://localhost:8080/users/library" -Method GET
 # Login lại
 .\mangahub.exe auth login --username testuser
 ```
+# MangaHub Phase 2 - Testing & Execution Guide (TCP Sync)
+## Step 0: Start the System
 
----
+Run the main server to enable both HTTP and TCP functionalities.
 
+```bash
+# Terminal 1
+.\mangahub.exe server start
+```
+## Step 1: Establish TCP Sync Connection
+
+1.1 Connect to Sync Server
+```bash
+# Terminal 2
+.\mangahub.exe sync connect
+
+Expected_Result: ✓ Connected successfully!, Server: localhost:8081, and a unique Session ID.
+```
+
+1.2 Enable Real-time Monitoring 
+```bash
+# Terminal 2
+.\mangahub.exe sync monitor
+Expected_Result: Monitoring real-time sync updates... (Press Ctrl+C to exit).
+```
+
+## Step 2: Test Real-time Synchronization
+
+2.1 Update Progress from another terminal
+```bash
+# Terminal 3
+.\mangahub.exe auth login --username testuser
+.\mangahub.exe progress update --manga-id one-piece --chapter 505
+
+Expected_Result: Expected Result: A broadcast message should appear instantly in Terminal 2:
+[HH:mm:ss] ← Device updated: one-piece → Chapter 505
+```
+
+## Step 3: Statistics & Progress History
+
+3.1 Check Sync Statistics
+```bash
+# Terminal 3
+.\mangahub.exe sync status
+Expected_Result:
+Connection: ✓ Active
+
+Messages sent: Total count of updates sent by this client.
+
+Messages received: Total count of updates received from other devices.
+
+Last sync update: Should show one-piece ch. 505.
+```
+
+3.2 View Progress History
+```bash
+# View all library entries
+.\mangahub.exe progress history
+
+# Filter history by specific Manga ID
+.\mangahub.exe progress history --manga-id one-piece
+Expected_Result: Displays a clean list of manga with their respective chapters, reading status, and the last update timestamp.
+```
+## Step 4: Manual Sync & Disconnection
+
+4.1 Manual Synchronization
+```bash
+# Terminal 3
+.\mangahub.exe progress sync
+Expected_Result: Displays Syncing progress with server... followed by ✓ Progress successfully synchronized across all devices.
+```
+
+4.2 Disconnect TCP
+```bash
+# Terminal 3
+.\mangahub.exe sync disconnect
+Expected_Result: Status in sync status will change to Disconnected
+```
 
 ## Checklist Tóm Tắt
 
