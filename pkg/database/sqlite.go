@@ -42,7 +42,10 @@ func InitDB(dbPath string) *sql.DB {
         user_id TEXT,
         manga_id TEXT,
         current_chapter INTEGER DEFAULT 0,
+        current_volume INTEGER DEFAULT 0,
         status TEXT,
+        rating INTEGER DEFAULT 0,
+        notes TEXT DEFAULT '',
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (user_id, manga_id),
         FOREIGN KEY (user_id) REFERENCES users(id),
@@ -56,6 +59,11 @@ func InitDB(dbPath string) *sql.DB {
 
 	// Add cover_url column if it doesn't exist (migration for existing DBs)
 	db.Exec("ALTER TABLE manga ADD COLUMN cover_url TEXT DEFAULT ''")
+
+	// Add volume, rating, notes columns if they don't exist (migration for existing DBs)
+	db.Exec("ALTER TABLE user_progress ADD COLUMN current_volume INTEGER DEFAULT 0")
+	db.Exec("ALTER TABLE user_progress ADD COLUMN rating INTEGER DEFAULT 0")
+	db.Exec("ALTER TABLE user_progress ADD COLUMN notes TEXT DEFAULT ''")
 
 	log.Println("Kết nối SQLite thành công và Schema đã sẵn sàng.")
 	return db

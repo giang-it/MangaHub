@@ -52,7 +52,10 @@ type UserProgress struct {
 	UserID         string    `json:"user_id" db:"user_id"`
 	MangaID        string    `json:"manga_id" db:"manga_id"`
 	CurrentChapter int       `json:"current_chapter" db:"current_chapter"`
+	CurrentVolume  int       `json:"current_volume" db:"current_volume"`
 	Status         string    `json:"status" db:"status"`
+	Rating         int       `json:"rating" db:"rating"`
+	Notes          string    `json:"notes" db:"notes"`
 	UpdatedAt      time.Time `json:"updated_at" db:"updated_at"`
 }
 
@@ -74,6 +77,9 @@ type LibraryUpdateRequest struct {
 type ProgressUpdateRequest struct {
 	MangaID string `json:"manga_id" binding:"required"`
 	Chapter int    `json:"chapter" binding:"required"`
+	Volume  int    `json:"volume"`
+	Notes   string `json:"notes"`
+	Force   bool   `json:"force"`
 }
 
 type ProgressUpdate struct {
@@ -89,8 +95,11 @@ type LibraryEntry struct {
 	Title          string `json:"title"`
 	Author         string `json:"author"`
 	CurrentChapter int    `json:"current_chapter"`
+	CurrentVolume  int    `json:"current_volume"`
 	TotalChapters  int    `json:"total_chapters"`
 	Status         string `json:"status"`
+	Rating         int    `json:"rating"`
+	Notes          string `json:"notes"`
 	UpdatedAt      string `json:"updated_at"`
 }
 

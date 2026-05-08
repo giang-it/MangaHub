@@ -659,6 +659,7 @@ func main() {
 	}
 
 	var mangaID, libStatus string
+	var libRating int
 	var libAddCmd = &cobra.Command{
 		Use:   "add",
 		Short: "Add manga to library",
@@ -700,7 +701,8 @@ func main() {
 		},
 	}
 	libAddCmd.Flags().StringVar(&mangaID, "manga-id", "", "Manga ID")
-	libAddCmd.Flags().StringVar(&libStatus, "status", "reading", "Status (reading, completed, plan-to-read)")
+	libAddCmd.Flags().StringVar(&libStatus, "status", "reading", "Status (reading, completed, plan-to-read, on-hold, dropped)")
+	libAddCmd.Flags().IntVar(&libRating, "rating", 0, "Rating (1-10)")
 	libAddCmd.MarkFlagRequired("manga-id")
 
 	var libListCmd = &cobra.Command{
@@ -789,9 +791,67 @@ func main() {
 	libRemoveCmd.Flags().StringVar(&mangaID, "manga-id", "", "Manga ID")
 	libRemoveCmd.MarkFlagRequired("manga-id")
 
+	// --- LIBRARY UPDATE CLI COMMAND ---
+	var libUpdateCmd = &cobra.Command{
+		Use:   "update",
+		Short: "Update library entry (status and/or rating)",
+		Run: func(cmd *cobra.Command, args []string) {
+			token := getToken()
+			if token == "" {
+				fmt.Println("Not logged in. Please login first.")
+				return
+			}
+
+			reqData := map[string]interface{}{
+				"manga_id": mangaID,
+			}
+			if libStatus != "" {
+				reqData["status"] = libStatus
+			}
+			if libRating > 0 {
+				reqData["rating"] = libRating
+			}
+
+			reqBody, _ := json.Marshal(reqData)
+
+			req, _ := http.NewRequest("PUT", apiURL+"/users/library", bytes.NewBuffer(reqBody))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+token)
+
+			client := &http.Client{}
+			resp, err := client.Do(req)
+			if err != nil {
+				fmt.Println("✗ Error: Server connection error")
+				return
+			}
+			defer resp.Body.Close()
+
+			var result map[string]interface{}
+			json.NewDecoder(resp.Body).Decode(&result)
+
+			if resp.StatusCode != http.StatusOK {
+				fmt.Printf("✗ Update failed: %v\n", result["error"])
+				return
+			}
+
+			fmt.Println("✓ Library entry updated!")
+			if result["status"] != nil {
+				fmt.Printf("  Status: %v\n", result["status"])
+			}
+			if result["rating"] != nil {
+				fmt.Printf("  Rating: %v/10\n", result["rating"])
+			}
+		},
+	}
+	libUpdateCmd.Flags().StringVar(&mangaID, "manga-id", "", "Manga ID")
+	libUpdateCmd.Flags().StringVar(&libStatus, "status", "", "New status (reading, completed, plan-to-read, on-hold, dropped)")
+	libUpdateCmd.Flags().IntVar(&libRating, "rating", 0, "Rating (1-10)")
+	libUpdateCmd.MarkFlagRequired("manga-id")
+
 	libraryCmd.AddCommand(libAddCmd)
 	libraryCmd.AddCommand(libListCmd)
 	libraryCmd.AddCommand(libRemoveCmd)
+	libraryCmd.AddCommand(libUpdateCmd)
 
 	// --- PROGRESS CLI COMMANDS ---
 	var progressCmd = &cobra.Command{
@@ -799,7 +859,9 @@ func main() {
 		Short: "Progress Tracking",
 	}
 
-	var chapter int
+	var chapter, volume int
+	var notes string
+	var forceProgress bool
 	var progressUpdateCmd = &cobra.Command{
 		Use:   "update",
 		Short: "Update reading progress",
@@ -810,10 +872,21 @@ func main() {
 				return
 			}
 
-			reqBody, _ := json.Marshal(map[string]interface{}{
+			reqData := map[string]interface{}{
 				"manga_id": mangaID,
 				"chapter":  chapter,
-			})
+			}
+			if volume > 0 {
+				reqData["volume"] = volume
+			}
+			if notes != "" {
+				reqData["notes"] = notes
+			}
+			if forceProgress {
+				reqData["force"] = true
+			}
+
+			reqBody, _ := json.Marshal(reqData)
 
 			req, _ := http.NewRequest("PUT", apiURL+"/users/progress", bytes.NewBuffer(reqBody))
 			req.Header.Set("Content-Type", "application/json")
@@ -839,11 +912,20 @@ func main() {
 			fmt.Printf("  Manga: %v\n", result["manga"])
 			fmt.Printf("  Previous: Chapter %v\n", result["previous_chapter"])
 			fmt.Printf("  Current:  Chapter %v\n", result["current_chapter"])
+			if result["volume"] != nil {
+				fmt.Printf("  Volume:   %v\n", result["volume"])
+			}
 			fmt.Printf("  Status:   %v\n", result["status"])
+			if result["notes"] != nil {
+				fmt.Printf("  Notes:    %v\n", result["notes"])
+			}
 		},
 	}
 	progressUpdateCmd.Flags().StringVar(&mangaID, "manga-id", "", "Manga ID")
 	progressUpdateCmd.Flags().IntVar(&chapter, "chapter", 0, "Chapter number")
+	progressUpdateCmd.Flags().IntVar(&volume, "volume", 0, "Volume number")
+	progressUpdateCmd.Flags().StringVar(&notes, "notes", "", "Reading notes")
+	progressUpdateCmd.Flags().BoolVar(&forceProgress, "force", false, "Force backward progress")
 	progressUpdateCmd.MarkFlagRequired("manga-id")
 	progressUpdateCmd.MarkFlagRequired("chapter")
 
