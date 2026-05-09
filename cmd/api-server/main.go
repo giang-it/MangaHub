@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
@@ -24,6 +26,7 @@ import (
 	"mangahub/internal/tcp"
 	internalUDP "mangahub/internal/udp"
 	userHandler "mangahub/internal/user"
+	chatPkg "mangahub/internal/websocket"
 	"mangahub/pkg/database"
 	"mangahub/pkg/models"
 	tcpPkg "mangahub/pkg/tcp"
@@ -31,8 +34,9 @@ import (
 )
 
 var (
-	apiURL    = "http://localhost:8080"
-	tokenFile = ".mangahub_token"
+	apiURL        = "http://localhost:8080"
+	tokenFile     = ".mangahub_token"
+	globalChatHub *chatPkg.Hub
 )
 
 func getToken() string {
@@ -67,6 +71,21 @@ func getCurrentUserID() string {
 		return ""
 	}
 	return claims["user_id"].(string)
+}
+
+func getUsernameFromDB(userID string) string {
+	if userID == "" {
+		return ""
+	}
+	db := database.InitDB("./data/mangahub.db")
+	defer db.Close()
+
+	var username string
+	err := db.QueryRow("SELECT username FROM users WHERE id = ?", userID).Scan(&username)
+	if err != nil {
+		return ""
+	}
+	return username
 }
 
 func validatePassword(password string) error {
@@ -108,6 +127,11 @@ func runServer() {
 	udpServer := internalUDP.NewNotificationServer("9091")
 	globalUDPServer = udpServer
 	go udpServer.Start()
+
+	// Khởi chạy WebSocket Chat Server trên cổng 9093
+	wsServer := chatPkg.NewChatServer("9093")
+	globalChatHub = wsServer.Hub
+	go wsServer.Start()
 
 	r := gin.Default()
 
@@ -432,6 +456,7 @@ func main() {
 	registerCmd.Flags().StringVar(&username, "username", "", "Username")
 	registerCmd.Flags().StringVar(&email, "email", "", "Email")
 	registerCmd.MarkFlagRequired("username")
+	registerCmd.MarkFlagRequired("email")
 
 	var loginCmd = &cobra.Command{
 		Use:   "login",
@@ -1561,6 +1586,146 @@ func main() {
 
 	notifyCmd.AddCommand(notifySubscribeCmd, notifyUnsubscribeCmd, notifyPreferencesCmd, notifyTestCmd)
 
+	// ─── CHAT CLI COMMANDS ──
+	var chatCmd = &cobra.Command{
+		Use:   "chat",
+		Short: "Real-time chat commands",
+	}
+
+	var chatRoomID string
+	var chatJoinCmd = &cobra.Command{
+		Use:   "join",
+		Short: "Join a chat room (default: #general or specify --manga-id)",
+		Run: func(cmd *cobra.Command, args []string) {
+			token := getToken()
+			if token == "" {
+				fmt.Println("Not logged in. Please login first.")
+				return
+			}
+			userID := getCurrentUserID()
+			username := getUsernameFromDB(userID)
+			if username == "" {
+				username = "User_" + userID[:5]
+			}
+
+			room := "#general"
+			if chatRoomID != "" {
+				room = chatRoomID
+			}
+
+			fmt.Println("Connecting to WebSocket chat server at ws://localhost:9093...")
+
+			u := url.URL{Scheme: "ws", Host: "localhost:9093", Path: "/ws"}
+			q := u.Query()
+			q.Set("user_id", userID)
+			q.Set("username", username)
+			q.Set("room", room)
+			u.RawQuery = q.Encode()
+
+			// Dùng websocket của Gorilla để dial
+			c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+			if err != nil {
+				log.Fatal("dial error:", err)
+			}
+			defer c.Close()
+
+			if room == "#general" {
+				fmt.Println("✓ Connected to General Chat")
+			} else {
+				fmt.Printf("✓ Connected to %s Discussion\n", room)
+			}
+			fmt.Printf("Chat Room: %s\nYour status: Online\n", room)
+			fmt.Println(strings.Repeat("─", 60))
+			fmt.Println("You are now in chat. Type your message and press Enter.")
+			fmt.Println("Type /help for commands or /quit to leave.")
+
+			// Goroutine để đọc tin nhắn từ server
+			go func() {
+				for {
+					_, message, err := c.ReadMessage()
+					if err != nil {
+						log.Println("\nDisconnected from server.")
+						return
+					}
+					var msg chatPkg.ChatMessage // <--- Đã sửa thành chatPkg
+					if err := json.Unmarshal(message, &msg); err == nil {
+						timeStr := time.Unix(msg.Timestamp, 0).Format("15:04")
+						if msg.Username == "SYSTEM" {
+							fmt.Printf("\n[%s] *** %s ***\n", timeStr, msg.Message)
+						} else {
+							fmt.Printf("\n[%s] %s: %s\n", timeStr, msg.Username, msg.Message)
+						}
+						fmt.Printf("%s> ", username)
+					}
+				}
+			}()
+
+			// Vòng lặp chính để đọc input từ bàn phím
+			scanner := bufio.NewScanner(os.Stdin)
+			for {
+				fmt.Printf("%s> ", username)
+				if !scanner.Scan() {
+					break
+				}
+				text := scanner.Text()
+				text = strings.TrimSpace(text)
+
+				if text == "" {
+					continue
+				}
+
+				if strings.HasPrefix(text, "/") {
+					parts := strings.SplitN(text, " ", 3)
+					command := parts[0]
+
+					switch command {
+					case "/quit":
+						fmt.Println("Leaving chat...")
+						// Dùng websocket của Gorilla để gửi CloseMessage
+						c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+						fmt.Println("✓ Disconnected from chat server")
+						return
+					case "/help":
+						fmt.Println("\nChat Commands:")
+						fmt.Println("/help      - Show this help")
+						fmt.Println("/quit      - Leave chat")
+						fmt.Println("/pm <user> <msg>- Private message")
+						continue
+					case "/pm":
+						if len(parts) < 3 {
+							fmt.Println("Usage: /pm <username> <message>")
+							continue
+						}
+						targetUser := parts[1]
+						pmText := parts[2]
+						msg := chatPkg.ChatMessage{ // <--- Đã sửa thành chatPkg
+							Message:    pmText,
+							IsPrivate:  true,
+							TargetUser: targetUser,
+						}
+						c.WriteJSON(msg)
+						continue
+					default:
+						fmt.Println("Unknown command. Type /help for a list of commands.")
+						continue
+					}
+				}
+
+				// Gửi tin nhắn bình thường
+				msg := chatPkg.ChatMessage{ // <--- Đã sửa thành chatPkg
+					Message: text,
+				}
+				err := c.WriteJSON(msg)
+				if err != nil {
+					log.Println("write error:", err)
+					return
+				}
+			}
+		},
+	}
+	chatJoinCmd.Flags().StringVar(&chatRoomID, "manga-id", "", "Join specific manga discussion")
+
+	chatCmd.AddCommand(chatJoinCmd)
 	rootCmd.AddCommand(serverCmd)
 	rootCmd.AddCommand(authCmd)
 	rootCmd.AddCommand(mangaCmd)
@@ -1568,6 +1733,7 @@ func main() {
 	rootCmd.AddCommand(progressCmd)
 	rootCmd.AddCommand(syncCmd)
 	rootCmd.AddCommand(notifyCmd)
+	rootCmd.AddCommand(chatCmd)
 
 	if len(os.Args) == 1 {
 		// Run server by default if no arguments are provided
