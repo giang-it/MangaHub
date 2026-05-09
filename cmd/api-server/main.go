@@ -1647,15 +1647,24 @@ func main() {
 						log.Println("\nDisconnected from server.")
 						return
 					}
-					var msg chatPkg.ChatMessage // <--- Đã sửa thành chatPkg
+					var msg chatPkg.ChatMessage
 					if err := json.Unmarshal(message, &msg); err == nil {
 						timeStr := time.Unix(msg.Timestamp, 0).Format("15:04")
+
+						// Xử lý hiển thị UI cho từng loại tin nhắn
 						if msg.Username == "SYSTEM" {
 							fmt.Printf("\n[%s] *** %s ***\n", timeStr, msg.Message)
+						} else if msg.IsPrivate {
+							if msg.Username == username {
+								fmt.Printf("\n[%s] [Private to %s]: %s\n", timeStr, msg.TargetUser, msg.Message)
+							} else {
+								fmt.Printf("\n[%s] [Private from %s]: %s\n", timeStr, msg.Username, msg.Message)
+							}
 						} else {
 							fmt.Printf("\n[%s] %s: %s\n", timeStr, msg.Username, msg.Message)
 						}
-						fmt.Printf("%s> ", username)
+
+						fmt.Printf("%s> ", username) // Vẽ lại prompt
 					}
 				}
 			}()

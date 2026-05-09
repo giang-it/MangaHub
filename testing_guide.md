@@ -196,7 +196,7 @@ Invoke-RestMethod -Uri "http://localhost:8080/users/library" -Method GET
 # Login lại
 .\mangahub.exe auth login --username testuser
 ```
-# MangaHub Phase 2 - Testing & Execution Guide (TCP Sync)
+# Testing & Execution Guide (TCP Sync)
 ## Step 0: Start the System
 
 Run the main server to enable both HTTP and TCP functionalities.
@@ -275,6 +275,77 @@ Expected_Result: Displays Syncing progress with server... followed by ✓ Progre
 Expected_Result: Status in sync status will change to Disconnected
 ```
 
+# Testing & Execution Guide (WebSocket Chat)
+
+## Step 0: Start the System
+
+Run the main server to enable all functionalities, including WebSocket on port 9093.
+
+```bash
+# Terminal 1
+.\mangahub.exe server start
+Expected_Result: WebSocket Chat Server listening on ws://localhost:9093
+```
+
+## Step 1: Connect General Chat
+
+1.1 Login and Join Chat (User A)
+```bash
+# Terminal 2
+.\mangahub.exe auth login --username alice
+.\mangahub.exe chat join
+Expected_Result: ✓ Connected to General Chat, Chat Room: #general, and Your status: Online.
+```
+
+1.2 Second User Joins General Chat (User B)
+```bash
+# Terminal 3
+.\mangahub.exe auth login --username Tien
+.\mangahub.exe chat join
+```
+Expected_Result: Terminal 2 (alice) instantly receives the system notification [HH:mm] *** Tien joined the chat ***.
+
+## Step 2: Test Real-time Messaging\
+
+2.1 Send a Public Message
+```bash
+# Terminal 3 (Tien)
+Tien> Hello everyone!
+Expected_Result: Terminal 2 (alice) instantly receives the message: [HH:mm] Tien: Hello everyone!.
+```
+## Step 3: Test Isolated Manga Rooms (Room Management Bonus)
+
+3.1 Join Different Discussion Rooms
+```bash
+# Terminal 2 (alice)
+alice> /quit
+.\mangahub.exe chat join --manga-id one-piece
+
+# Terminal 3 (Tien)
+Tien> /quit
+.\mangahub.exe chat join --manga-id naruto
+Expected_Result: Alice connects to the one-piece Discussion, and Tien connects to the naruto Discussion. Any regular messages sent by either user will NOT be seen by the other, proving that the chat rooms are completely isolated.
+```
+## Step 4: Test Cross-Room Private Messaging
+
+4.1 Send a Private Message
+```bash
+# Terminal 3 (Tien)
+Tien> /pm alice Hello, are you reading One Piece?
+Expected_Result:
+  Terminal 3 (Tien) displays: [HH:mm] [Private to alice]: Hello, are you reading One Piece?
+
+  Terminal 2 (alice) instantly receives: [HH:mm] [Private from Tien]: Hello, are you reading One Piece? regardless of being in a different manga room.
+```
+## Step 5: Test System Commands and Disconnection
+
+5.1 Use Chat Commands
+```bash
+# Terminal 2 (alice)
+alice> /help
+alice> /quit
+Expected_Result: /help displays the list of available commands. /quit gracefully disconnects the user from the WebSocket server and returns to the standard command line interface.
+```
 ## Checklist Tóm Tắt
 
 | Feature | Command Test | Expected |
