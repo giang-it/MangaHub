@@ -293,3 +293,215 @@ Expected_Result: Status in sync status will change to Disconnected
 | JWT protection | API call without token | 401 Unauthorized |
 | Invalid chapter | `progress update --chapter 9999` | Error: exceeds total |
 | Duplicate add | `library add` manga đã có | Error: already in library |
+
+---
+
+# MangaHub Phase 3 - Testing & Execution Guide (UDP Notification System)
+
+## Overview
+
+The UDP Notification System lets clients register to receive real-time chapter release notifications broadcast over UDP (port **9091**).
+
+## Step 0: Start the Server
+
+```bash
+# Terminal 1
+.\mangahub.exe server start
+```
+
+Expected output includes:
+```
+TCP Sync Server listening on tcp://localhost:8081
+UDP Notification Server listening on udp://localhost:9091
+Server is running on port 8080...
+```
+
+---
+
+## Step 1: Check Server Status (includes UDP)
+
+```bash
+.\mangahub.exe server status
+```
+
+Expected output:
+```
+MangaHub Server Status
+────────────────────────────────────────────────────────────
+✓ HTTP API:        Online  (localhost:8080)
+✓ TCP Sync:        Online  (localhost:8081)
+✓ UDP Notify:      Online  (localhost:9091)
+────────────────────────────────────────────────────────────
+Overall System Health: ✓ Healthy
+```
+
+---
+
+## Step 2: Subscribe to Notifications
+
+### 2.1 Login first
+```bash
+# Terminal 2
+.\mangahub.exe auth login --username g1 (password: 123456Aa)
+```
+
+### 2.2 Subscribe
+```bash
+.\mangahub.exe notify subscribe
+```
+
+Expected output:
+```
+✓ Subscribed to chapter release notifications!
+
+Notification Details:
+  Server:       localhost:9091
+  Subscribed:   2026-05-09 05:00:00 UTC
+  User ID:      <your-user-id>
+  Successfully registered for notifications. Total subscribers: 1
+
+You will receive UDP notifications when new chapters are released.
+Run 'mangahub notify unsubscribe' to stop receiving notifications.
+Run 'mangahub notify test' to trigger a test notification.
+```
+
+### 2.3 Test duplicate subscribe
+```bash
+.\mangahub.exe notify subscribe
+```
+Expected: "Already subscribed to notifications."
+
+---
+
+## Step 3: View Notification Preferences
+
+```bash
+.\mangahub.exe notify preferences
+```
+
+Expected output:
+```
+Notification Preferences:
+────────────────────────────────────────
+  Status:       ✓ Subscribed
+  Server:       localhost:9091
+  Subscribed:   2026-05-09 05:00:00 UTC
+  User ID:      <your-user-id>
+────────────────────────────────────────
+
+Available Commands:
+  mangahub notify unsubscribe  - Stop receiving notifications
+  mangahub notify test         - Send a test notification
+```
+
+---
+
+## Step 4: Send a Test Notification Broadcast
+
+```bash
+# From another terminal (Terminal 3)
+.\mangahub.exe notify test
+```
+
+Expected output:
+```
+✓ Test broadcast sent for manga 'test-manga'
+
+Notification Details:
+  Type:    chapter_release
+  Manga:   test-manga
+  Message: [TEST] New chapter of 'test-manga' is now available!
+  Server:  localhost:9091
+
+All registered subscribers should receive this notification.
+```
+
+### 4.1 Test with specific manga ID
+```bash
+.\mangahub.exe notify test --manga-id one-piece
+```
+
+Expected: Broadcast sent for 'one-piece'.
+
+---
+
+## Step 5: Direct UDP Testing via PowerShell
+
+```powershell
+# Test registration directly
+$udpClient = New-Object System.Net.Sockets.UdpClient
+$udpClient.Connect("localhost", 9091)
+
+# Send registration packet
+$msg = '{"action":"register","user_id":"test-user"}'
+$bytes = [System.Text.Encoding]::UTF8.GetBytes($msg)
+$udpClient.Send($bytes, $bytes.Length)
+
+# Receive confirmation
+$ep = New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Any, 0)
+$data = $udpClient.Receive([ref]$ep)
+[System.Text.Encoding]::UTF8.GetString($data)
+```
+
+Expected response:
+```json
+{"status":"registered","message":"Successfully registered for notifications. Total subscribers: N"}
+```
+
+```powershell
+# Send broadcast trigger
+$broadcast = '{"action":"broadcast","manga_id":"one-piece","message":"Chapter 1101 released!","type":"chapter_release"}'
+$bytes2 = [System.Text.Encoding]::UTF8.GetBytes($broadcast)
+$udpClient.Send($bytes2, $bytes2.Length)
+
+# Receive broadcast ack
+$data2 = $udpClient.Receive([ref]$ep)
+[System.Text.Encoding]::UTF8.GetString($data2)
+```
+
+Expected: `{"status":"broadcast_triggered","message":"Broadcast initiated for manga 'one-piece'"}`
+
+```powershell
+# Cleanup
+$udpClient.Close()
+```
+
+---
+
+## Step 6: Unsubscribe
+
+```bash
+.\mangahub.exe notify unsubscribe
+```
+
+Expected output:
+```
+✓ Unsubscribed from notifications.
+You will no longer receive chapter release notifications.
+Run 'mangahub notify subscribe' to subscribe again.
+```
+
+### 6.1 Check preferences after unsubscribe
+```bash
+.\mangahub.exe notify preferences
+```
+Expected: Status shows `✗ Not subscribed`.
+
+---
+
+## Phase 3 Checklist
+
+| Feature | Command | Expected |
+|---------|---------|----------|
+| Server start (UDP) | `server start` | UDP listening on :9091 |
+| Server status (UDP) | `server status` | ✓ UDP Notify: Online |
+| Subscribe | `notify subscribe` | ✓ Subscribed |
+| Duplicate subscribe | `notify subscribe` again | Already subscribed msg |
+| Preferences (subscribed) | `notify preferences` | Shows subscription info |
+| Test broadcast | `notify test` | Broadcast sent |
+| Test with manga ID | `notify test --manga-id one-piece` | Broadcast for one-piece |
+| Unsubscribe | `notify unsubscribe` | ✓ Unsubscribed |
+| Preferences (unsubscribed) | `notify preferences` | Not subscribed msg |
+| Direct UDP registration | PowerShell UDP test | JSON response with status |
+| Broadcast trigger | PowerShell broadcast packet | broadcast_triggered ack |
+

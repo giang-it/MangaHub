@@ -1181,5 +1181,18 @@
         "status": "ongoing",
         "total_chapters": 110,
         "description": "A historical romance set in the Ottoman Empire, focusing on the life of Hürrem Sultan in the imperial harem."
+    },
+    {
+        "id": "giang",
+        "title": "Giang",
+        "author": "Giang",
+        "genres": [
+            "Action",
+            "Adventure",
+            "Seinen"
+        ],
+        "status": "ongoing",
+        "total_chapters": 327,
+        "description": "giang it"
     }
 ]

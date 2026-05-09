@@ -22,10 +22,12 @@ import (
 	"mangahub/internal/auth"
 	mangaHandler "mangahub/internal/manga"
 	"mangahub/internal/tcp"
+	internalUDP "mangahub/internal/udp"
 	userHandler "mangahub/internal/user"
 	"mangahub/pkg/database"
 	"mangahub/pkg/models"
 	tcpPkg "mangahub/pkg/tcp"
+	udpPkg "mangahub/pkg/udp"
 )
 
 var (
@@ -87,6 +89,9 @@ func validatePassword(password string) error {
 	return nil
 }
 
+// globalUDPServer is used by the HTTP progress-update handler to trigger notifications.
+var globalUDPServer *internalUDP.NotificationServer
+
 func runServer() {
 	db := database.InitDB("./data/mangahub.db")
 	defer db.Close()
@@ -98,6 +103,11 @@ func runServer() {
 	// Khởi chạy TCP Sync Server trên cổng 8081
 	tcpServer := tcp.NewProgressSyncServer("8081", broadcastChan)
 	go tcpServer.Start()
+
+	// Khởi chạy UDP Notification Server trên cổng 9091
+	udpServer := internalUDP.NewNotificationServer("9091")
+	globalUDPServer = udpServer
+	go udpServer.Start()
 
 	r := gin.Default()
 
@@ -291,20 +301,60 @@ func main() {
 		Use:   "status",
 		Short: "Check server status",
 		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Println("MangaHub Server Status")
+			fmt.Println(strings.Repeat("─", 60))
+
+			// --- HTTP API ---
 			resp, err := http.Get(apiURL + "/manga?limit=1")
 			if err != nil {
-				fmt.Println("✗ HTTP API: Offline")
-				return
+				fmt.Println("✗ HTTP API:        Offline (localhost:8080)")
+			} else {
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					fmt.Println("✓ HTTP API:        Online  (localhost:8080)")
+				} else {
+					fmt.Println("⚠ HTTP API:        Degraded (localhost:8080)")
+				}
 			}
-			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				fmt.Println("MangaHub Server Status")
-				fmt.Println("----------------------")
-				fmt.Println("✓ HTTP API: Online (localhost:8080)")
-				fmt.Println("✓ TCP Sync: Online (localhost:8081)")
+
+			// --- TCP Sync ---
+			tcpConn, tcpErr := net.DialTimeout("tcp", "localhost:8081", 2*time.Second)
+			if tcpErr != nil {
+				fmt.Println("✗ TCP Sync:        Offline (localhost:8081)")
+			} else {
+				tcpConn.Close()
+				fmt.Println("✓ TCP Sync:        Online  (localhost:8081)")
+			}
+
+			// --- UDP Notifications ---
+			udpAddr, _ := net.ResolveUDPAddr("udp", "localhost:9091")
+			udpProbe, udpErr := net.DialUDP("udp", nil, udpAddr)
+			if udpErr != nil {
+				fmt.Println("✗ UDP Notify:      Offline (localhost:9091)")
+			} else {
+				// UDP is connectionless; a successful dial means the local stack is OK.
+				// Send a probe packet and wait briefly for a response.
+				probe, _ := json.Marshal(map[string]string{"action": "ping", "user_id": "status-check"})
+				udpProbe.SetDeadline(time.Now().Add(500 * time.Millisecond))
+				udpProbe.Write(probe)
+				buf := make([]byte, 256)
+				_, udpReadErr := udpProbe.Read(buf)
+				udpProbe.Close()
+				if udpReadErr != nil {
+					// No response – server may still be up; treat as online
+					fmt.Println("⚠ UDP Notify:      Degraded (localhost:9091) – no response")
+				} else {
+					fmt.Println("✓ UDP Notify:      Online  (localhost:9091)")
+				}
+			}
+
+			fmt.Println(strings.Repeat("─", 60))
+
+			// Overall health
+			if err == nil && tcpErr == nil {
 				fmt.Println("Overall System Health: ✓ Healthy")
 			} else {
-				fmt.Println("⚠ HTTP API: Degraded")
+				fmt.Println("Overall System Health: ⚠ Degraded")
 			}
 		},
 	}
@@ -1266,12 +1316,258 @@ func main() {
 	progressCmd.AddCommand(progressSyncCmd)
 	progressCmd.AddCommand(progressSyncStatusCmd)
 
+	// ─── UDP NOTIFY CLI COMMANDS ───────────────────────────────────────────────
+	var notifyCmd = &cobra.Command{
+		Use:   "notify",
+		Short: "UDP Notification Commands",
+	}
+
+	// notify subscribe
+	var notifySubscribeCmd = &cobra.Command{
+		Use:   "subscribe",
+		Short: "Subscribe to chapter release notifications via UDP",
+		Run: func(cmd *cobra.Command, args []string) {
+			state := udpPkg.LoadNotifyState()
+			if state.Subscribed {
+				fmt.Println("Already subscribed to notifications.")
+				fmt.Printf("Server: %s\n", state.ServerAddr)
+				fmt.Println("Run 'mangahub notify unsubscribe' to stop.")
+				return
+			}
+
+			userID := getCurrentUserID()
+			if userID == "" {
+				fmt.Println("Not logged in. Please login first.")
+				return
+			}
+
+			serverAddr := "localhost:9091"
+			udpAddr, err := net.ResolveUDPAddr("udp", serverAddr)
+			if err != nil {
+				fmt.Printf("✗ Subscribe failed: cannot resolve server address: %v\n", err)
+				return
+			}
+
+			// Bind a local port so the server can send us notifications.
+			localAddr, _ := net.ResolveUDPAddr("udp", "localhost:0")
+			conn, err := net.ListenUDP("udp", localAddr)
+			if err != nil {
+				fmt.Printf("✗ Subscribe failed: %v\n", err)
+				return
+			}
+			defer conn.Close()
+
+			// Send registration packet
+			regMsg, _ := json.Marshal(map[string]string{
+				"action":  "register",
+				"user_id": userID,
+			})
+			conn.WriteToUDP(regMsg, udpAddr)
+
+			// Wait for server confirmation
+			conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+			buf := make([]byte, 512)
+			n, _, err := conn.ReadFromUDP(buf)
+			if err != nil {
+				fmt.Println("✗ Subscribe failed: no response from UDP server (is server running?)")
+				return
+			}
+
+			var resp map[string]string
+			json.Unmarshal(buf[:n], &resp)
+
+			if resp["status"] != "registered" {
+				fmt.Printf("✗ Subscribe failed: %s\n", resp["message"])
+				return
+			}
+
+			// Save local subscription state
+			newState := udpPkg.NotifyState{
+				Subscribed:   true,
+				ServerAddr:   serverAddr,
+				SubscribedAt: time.Now(),
+				UserID:       userID,
+			}
+			udpPkg.SaveNotifyState(newState)
+
+			fmt.Println("✓ Subscribed to chapter release notifications!")
+			fmt.Printf("\nNotification Details:\n")
+			fmt.Printf("  Server:       %s\n", serverAddr)
+			fmt.Printf("  Subscribed:   %s UTC\n", time.Now().Format("2006-01-02 15:04:05"))
+			fmt.Printf("  User ID:      %s\n", userID)
+			fmt.Printf("  %s\n", resp["message"])
+			fmt.Println("\nYou will receive UDP notifications when new chapters are released.")
+			fmt.Println("Run 'mangahub notify unsubscribe' to stop receiving notifications.")
+			fmt.Println("Run 'mangahub notify test' to trigger a test notification.")
+
+			fmt.Println("\nListening for notifications... (Press Ctrl+C to exit)")
+
+			// Xóa deadline trước đó để lắng nghe vô thời hạn
+			conn.SetReadDeadline(time.Time{})
+
+			for {
+				n, _, err := conn.ReadFromUDP(buf)
+				if err != nil {
+					fmt.Printf("\nStopped listening: %v\n", err)
+					break
+				}
+
+				var notif internalUDP.Notification
+				if err := json.Unmarshal(buf[:n], &notif); err == nil && notif.Type != "" {
+					fmt.Printf("\n[%s] 🔔 NOTIFICATION RECEIVED!\n", time.Now().Format("15:04:05"))
+					fmt.Printf("  Manga: %s\n", notif.MangaID)
+					fmt.Printf("  Message: %s\n", notif.Message)
+				} else {
+					fmt.Printf("\n[%s] 🔔 Raw Notification: %s\n", time.Now().Format("15:04:05"), string(buf[:n]))
+				}
+			}
+		},
+	}
+
+	// notify unsubscribe
+	var notifyUnsubscribeCmd = &cobra.Command{
+		Use:   "unsubscribe",
+		Short: "Unsubscribe from chapter release notifications",
+		Run: func(cmd *cobra.Command, args []string) {
+			state := udpPkg.LoadNotifyState()
+			if !state.Subscribed {
+				fmt.Println("Not currently subscribed to notifications.")
+				return
+			}
+
+			userID := getCurrentUserID()
+			if userID == "" {
+				userID = state.UserID
+			}
+
+			udpAddr, err := net.ResolveUDPAddr("udp", state.ServerAddr)
+			if err == nil {
+				localAddr, _ := net.ResolveUDPAddr("udp", "localhost:0")
+				conn, connErr := net.ListenUDP("udp", localAddr)
+				if connErr == nil {
+					defer conn.Close()
+					unregMsg, _ := json.Marshal(map[string]string{
+						"action":  "unregister",
+						"user_id": userID,
+					})
+					conn.WriteToUDP(unregMsg, udpAddr)
+				}
+			}
+
+			state.Subscribed = false
+			udpPkg.SaveNotifyState(state)
+
+			fmt.Println("✓ Unsubscribed from notifications.")
+			fmt.Println("You will no longer receive chapter release notifications.")
+			fmt.Println("Run 'mangahub notify subscribe' to subscribe again.")
+		},
+	}
+
+	// notify preferences
+	var notifyPreferencesCmd = &cobra.Command{
+		Use:   "preferences",
+		Short: "View notification preferences",
+		Run: func(cmd *cobra.Command, args []string) {
+			state := udpPkg.LoadNotifyState()
+			fmt.Println("Notification Preferences:")
+			fmt.Println(strings.Repeat("─", 40))
+			subStatus := "✗ Not subscribed"
+			if state.Subscribed {
+				subStatus = "✓ Subscribed"
+			}
+			fmt.Printf("  Status:       %s\n", subStatus)
+			if state.Subscribed {
+				fmt.Printf("  Server:       %s\n", state.ServerAddr)
+				fmt.Printf("  Subscribed:   %s UTC\n", state.SubscribedAt.Format("2006-01-02 15:04:05"))
+				fmt.Printf("  User ID:      %s\n", state.UserID)
+			}
+			fmt.Println(strings.Repeat("─", 40))
+			fmt.Println("\nAvailable Commands:")
+			if state.Subscribed {
+				fmt.Println("  mangahub notify unsubscribe  - Stop receiving notifications")
+				fmt.Println("  mangahub notify test         - Send a test notification")
+			} else {
+				fmt.Println("  mangahub notify subscribe    - Start receiving notifications")
+			}
+		},
+	}
+
+	// notify test  – broadcasts a test notification to all subscribers
+	var notifyTestMangaID string
+	var notifyTestCmd = &cobra.Command{
+		Use:   "test",
+		Short: "Send a test notification broadcast",
+		Run: func(cmd *cobra.Command, args []string) {
+			// Resolve target: if --manga-id provided use it; else send generic test.
+			mid := notifyTestMangaID
+			if mid == "" {
+				mid = "test-manga"
+			}
+
+			serverAddr := "localhost:9091"
+			udpAddr, err := net.ResolveUDPAddr("udp", serverAddr)
+			if err != nil {
+				fmt.Printf("✗ Test failed: cannot resolve server address: %v\n", err)
+				return
+			}
+
+			// We trigger the broadcast by talking directly to the running server
+			// via a special "broadcast" action packet.
+			notif := internalUDP.Notification{
+				Type:    "chapter_release",
+				MangaID: mid,
+				Message: fmt.Sprintf("[TEST] New chapter of '%s' is now available!", mid),
+			}
+
+			// Connect to a local UDP socket and send a broadcast-trigger packet.
+			localAddr, _ := net.ResolveUDPAddr("udp", "localhost:0")
+			conn, connErr := net.ListenUDP("udp", localAddr)
+			if connErr != nil {
+				fmt.Printf("✗ Test failed: %v\n", connErr)
+				return
+			}
+			defer conn.Close()
+
+			// Send broadcast trigger packet to the server
+			trigger, _ := json.Marshal(map[string]interface{}{
+				"action":   "broadcast",
+				"manga_id": notif.MangaID,
+				"message":  notif.Message,
+				"type":     notif.Type,
+			})
+			conn.WriteToUDP(trigger, udpAddr)
+
+			// Wait briefly for acknowledgement
+			conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+			buf := make([]byte, 512)
+			_, _, readErr := conn.ReadFromUDP(buf)
+
+			if readErr != nil {
+				// No ack – that is OK; broadcast packets don't always get acked
+				fmt.Printf("✓ Test broadcast sent for manga '%s'\n", mid)
+			} else {
+				fmt.Printf("✓ Test notification broadcast sent and acknowledged for manga '%s'\n", mid)
+			}
+
+			fmt.Printf("\nNotification Details:\n")
+			fmt.Printf("  Type:    %s\n", notif.Type)
+			fmt.Printf("  Manga:   %s\n", notif.MangaID)
+			fmt.Printf("  Message: %s\n", notif.Message)
+			fmt.Printf("  Server:  %s\n", serverAddr)
+			fmt.Println("\nAll registered subscribers should receive this notification.")
+		},
+	}
+	notifyTestCmd.Flags().StringVar(&notifyTestMangaID, "manga-id", "", "Manga ID to use in test notification")
+
+	notifyCmd.AddCommand(notifySubscribeCmd, notifyUnsubscribeCmd, notifyPreferencesCmd, notifyTestCmd)
+
 	rootCmd.AddCommand(serverCmd)
 	rootCmd.AddCommand(authCmd)
 	rootCmd.AddCommand(mangaCmd)
 	rootCmd.AddCommand(libraryCmd)
 	rootCmd.AddCommand(progressCmd)
 	rootCmd.AddCommand(syncCmd)
+	rootCmd.AddCommand(notifyCmd)
 
 	if len(os.Args) == 1 {
 		// Run server by default if no arguments are provided

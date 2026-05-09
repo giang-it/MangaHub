@@ -161,231 +161,127 @@ _UC-008: Broadcast Progress Update_
 
 
 **Main Success Scenario** : 1. System receives progress update from HTTP API
-
-
 2. TCP server receives broadcast message via channel
-
-
 3. Server identifies connections for the specific user
-
-
 4. Server sends JSON progress message to connections
-
-
 5. Clients receive and process update
 
-
 **Alternative Flows** : - A1: Client connection lost - Server removes from active list
-
-
   - A2: Send fails - Server logs error and continues with other clients
+
 ### 3.4 Notification System
 
 _UC-009: Register for UDP Notifications_
-
-
 **Primary Actor** : UDP Client
 **Goal** : Register to receive chapter release notifications
 **Preconditions** : UDP server is running
 **Postconditions** : Client is registered for notifications
 
-
 **Main Success Scenario** : 1. Client sends UDP registration packet with user preferences
-
-
 2. Server receives registration and extracts client address
-
-
 3. Server adds client to notification list
-
-
 4. Server sends confirmation packet to client
-
-
 5. Client is ready to receive notifications
 
-
 _UC-010: Send Chapter Release Notification_
-
-
 **Primary Actor** : System Administrator
 **Goal** : Notify users about new chapter releases
 **Preconditions** : UDP server has registered clients
 **Postconditions** : Notification is broadcasted to clients
 
-
 **Main Success Scenario** : 1. Administrator triggers notification for specific manga
-
-
 2. System creates notification message with manga details
-
-
 3. UDP server broadcasts message to all registered clients
-
-
 4. Clients receive notification and display to users
-
-
 5. System logs successful broadcast
 
-
 **Alternative Flows** : - A1: Client unreachable - Server continues with other clients
-
-
   - A2: Network error - Server logs error and retries
+
 ### 3.5 Real-time Chat System
 
 _UC-011: Join Chat_
-
 
 **Primary Actor** : Chat User
 **Goal** : Connect to real-time chat system
 **Preconditions** : User is authenticated, WebSocket server running
 **Postconditions** : User is connected to chat
 
-
 **Main Success Scenario** : 1. User’s browser initiates WebSocket connection
-
-
 2. Server upgrades HTTP connection to WebSocket
-
-
 3. Client sends join message with user credentials
-
-
 4. Server validates user and adds to active connections
-
-
 5. Server broadcasts user join notification to other users
-
-
 6. User receives recent chat history
 
-
 _UC-012: Send Chat Message_
-
 
 **Primary Actor** : Chat User
 **Goal** : Send message to other connected users
 **Preconditions** : User is connected to chat
 **Postconditions** : Message is broadcasted to all users
 
-
 **Main Success Scenario** : 1. User types message and clicks send
-
-
 2. Client sends message via WebSocket connection
-
-
 3. Server receives message and validates user
-
-
 4. Server broadcasts message to all connected clients
-
-
 5. All users receive and display the message
 
-
 **Alternative Flows** : - A1: Message too long - Server returns error to sender
-
-
   - A2: User not authenticated - Server rejects message
 
-
 _UC-013: Handle User Disconnection_
-
 
 **Primary Actor** : System (Automated)
 **Goal** : Clean up when user leaves chat
 **Preconditions** : User was connected to chat
 **Postconditions** : User is removed from active connections
 
-
 **Main Success Scenario** : 1. System detects WebSocket connection closure
-
-
 2. Server removes connection from active list
-
-
 3. Server broadcasts user leave notification
-
-
 4. Other users see updated participant list
-
-
 5. Connection resources are cleaned up
 
 ### 3.6 gRPC Internal Services
 
 _UC-014: Retrieve Manga via gRPC_
 
-
 **Primary Actor** : Internal Service
 **Goal** : Fetch manga data through gRPC interface
 **Preconditions** : gRPC server is running
 **Postconditions** : Manga data is returned
 
-
 **Main Success Scenario** : 1. Client service calls GetManga gRPC method
-
-
 2. gRPC server receives request with manga ID
-
-
 3. Server queries database for manga information
-
-
 4. Server constructs protobuf response message
-
-
 5. Server returns manga data to client
 
-
 _UC-015: Search Manga via gRPC_
-
 
 **Primary Actor** : Internal Service
 **Goal** : Search manga using gRPC interface
 **Preconditions** : gRPC server is running, database populated
 **Postconditions** : Search results are returned
 
-
 **Main Success Scenario** : 1. Client calls SearchManga with search criteria
-
-
 2. gRPC server processes search parameters
-
-
 3. Server executes database query with filters
-
-
 4. Server constructs response with result list
-
-
 5. Server returns paginated results to client
 
-
 _UC-016: Update Progress via gRPC_
-
 
 **Primary Actor** : Internal Service
 **Goal** : Update user reading progress through gRPC
 **Preconditions** : User and manga exist
 **Postconditions** : Progress is updated in database
 
-
 **Main Success Scenario** : 1. Client calls UpdateProgress with user and manga data
-
-
 2. gRPC server validates request parameters
-
-
 3. Server updates user_progress table
-
-
 4. Server triggers TCP broadcast for real-time sync
-
-
 5. Server returns success confirmation
 
 ## 4. Bonus Feature Use Cases
