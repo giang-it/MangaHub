@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -31,6 +32,11 @@ import (
 	"mangahub/pkg/models"
 	tcpPkg "mangahub/pkg/tcp"
 	udpPkg "mangahub/pkg/udp"
+
+	grpcInternal "mangahub/internal/grpc"
+	pb "mangahub/proto"
+
+	"google.golang.org/grpc"
 )
 
 var (
@@ -132,6 +138,10 @@ func runServer() {
 	wsServer := chatPkg.NewChatServer("9093")
 	globalChatHub = wsServer.Hub
 	go wsServer.Start()
+
+	// Khởi tạo và chạy gRPC Server trên port 9092
+	gServer := grpcInternal.NewMangaServer(db, broadcastChan)
+	go gServer.Start("9092")
 
 	r := gin.Default()
 
@@ -1592,6 +1602,30 @@ func main() {
 		Short: "Real-time chat commands",
 	}
 
+	var grpcCmd = &cobra.Command{
+		Use:   "grpc",
+		Short: "gRPC Service Operations",
+	}
+
+	var grpcGetCmd = &cobra.Command{
+		Use:   "get",
+		Short: "Query manga via gRPC",
+		Run: func(cmd *cobra.Command, args []string) {
+			conn, _ := grpc.Dial("localhost:9092", grpc.WithInsecure())
+			defer conn.Close()
+			client := pb.NewMangaServiceClient(conn)
+
+			res, err := client.GetManga(context.Background(), &pb.GetMangaRequest{Id: mangaID})
+			if err != nil {
+				fmt.Printf("✗ gRPC Error: %v\n", err)
+				return
+			}
+			fmt.Printf("✓ [gRPC] Found: %s - %s\n", res.Title, res.Author)
+		},
+	}
+	grpcGetCmd.Flags().StringVar(&mangaID, "id", "", "Manga ID")
+	grpcCmd.AddCommand(grpcGetCmd)
+	rootCmd.AddCommand(grpcCmd)
 	var chatRoomID string
 	var chatJoinCmd = &cobra.Command{
 		Use:   "join",
