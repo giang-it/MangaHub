@@ -1622,6 +1622,11 @@ func main() {
 		Short: "gRPC Service Operations",
 	}
 
+	var grpcMangaCmd = &cobra.Command{
+		Use:   "manga",
+		Short: "gRPC Manga Operations",
+	}
+
 	var grpcGetCmd = &cobra.Command{
 		Use:   "get",
 		Short: "Query manga via gRPC",
@@ -1639,7 +1644,77 @@ func main() {
 		},
 	}
 	grpcGetCmd.Flags().StringVar(&mangaID, "id", "", "Manga ID")
-	grpcCmd.AddCommand(grpcGetCmd)
+	grpcMangaCmd.AddCommand(grpcGetCmd)
+
+	var grpcSearchQuery string
+	var grpcSearchCmd = &cobra.Command{
+		Use:   "search",
+		Short: "Search manga via gRPC",
+		Run: func(cmd *cobra.Command, args []string) {
+			conn, _ := grpc.Dial("localhost:9092", grpc.WithInsecure())
+			defer conn.Close()
+			client := pb.NewMangaServiceClient(conn)
+
+			res, err := client.SearchManga(context.Background(), &pb.SearchRequest{Query: grpcSearchQuery})
+			if err != nil {
+				fmt.Printf("✗ gRPC Error: %v\n", err)
+				return
+			}
+			if len(res.Results) == 0 {
+				fmt.Printf("No manga found matching your search criteria via gRPC.\n")
+				return
+			}
+			fmt.Printf("✓ [gRPC] Search Results for '%s':\n", grpcSearchQuery)
+			for _, m := range res.Results {
+				fmt.Printf("  - %s: %s (%s)\n", m.Id, m.Title, m.Author)
+			}
+		},
+	}
+	grpcSearchCmd.Flags().StringVar(&grpcSearchQuery, "query", "", "Search query")
+	grpcMangaCmd.AddCommand(grpcSearchCmd)
+
+	var grpcProgressCmd = &cobra.Command{
+		Use:   "progress",
+		Short: "gRPC Progress Operations",
+	}
+
+	var grpcChapter int
+	var grpcProgressUpdateCmd = &cobra.Command{
+		Use:   "update",
+		Short: "Update progress via gRPC",
+		Run: func(cmd *cobra.Command, args []string) {
+			token := getToken()
+			if token == "" {
+				fmt.Println("Not logged in.")
+				return
+			}
+			userID := getCurrentUserID()
+			conn, _ := grpc.Dial("localhost:9092", grpc.WithInsecure())
+			defer conn.Close()
+			client := pb.NewMangaServiceClient(conn)
+
+			res, err := client.UpdateProgress(context.Background(), &pb.ProgressRequest{
+				UserId:  userID,
+				MangaId: mangaID,
+				Chapter: int32(grpcChapter),
+			})
+			if err != nil {
+				fmt.Printf("✗ gRPC Error: %v\n", err)
+				return
+			}
+			if res.Success {
+				fmt.Printf("✓ [gRPC] %s\n", res.Message)
+			} else {
+				fmt.Printf("✗ [gRPC] Failed: %s\n", res.Message)
+			}
+		},
+	}
+	grpcProgressUpdateCmd.Flags().StringVar(&mangaID, "manga-id", "", "Manga ID")
+	grpcProgressUpdateCmd.Flags().IntVar(&grpcChapter, "chapter", 0, "Chapter number")
+	grpcProgressCmd.AddCommand(grpcProgressUpdateCmd)
+
+	grpcCmd.AddCommand(grpcMangaCmd)
+	grpcCmd.AddCommand(grpcProgressCmd)
 	rootCmd.AddCommand(grpcCmd)
 	var chatRoomID string
 	var chatJoinCmd = &cobra.Command{
