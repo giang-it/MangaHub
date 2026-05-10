@@ -38,3 +38,10 @@ mangahub progress history --manga-id <id>
 
 # View all progress updates
 mangahub progress history
+
+
+------------------------------------------------
+# test tcp sycn connection 
+## Step 2: Test Real-time Synchronization
+.\mangahub.exe progress update --manga-id one-piece --chapter 505
+ko có hiện như test

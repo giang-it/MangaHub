@@ -289,7 +289,19 @@ Expected_Result: WebSocket Chat Server listening on ws://localhost:9093
 
 ## Step 1: Connect General Chat
 
+
 1.1 Login and Join Chat (User A)
+----------------------------------------------------------------
+### Đăng nhập vào session "c1" bằng tài khoản g1
+.\mangahub.exe --session c1 auth login --username g1
+
+### Kiểm tra trạng thái của session "c1"
+.\mangahub.exe --session c1 auth status
+
+### Sau đó bắt đầu chat/nhận notify ở session "c1"
+.\mangahub.exe --session c1 notify subscribe
+--------------------------------------------------------------
+
 ```bash
 # Terminal 2
 .\mangahub.exe auth login --username alice
@@ -298,6 +310,17 @@ Expected_Result: ✓ Connected to General Chat, Chat Room: #general, and Your st
 ```
 
 1.2 Second User Joins General Chat (User B)
+
+----------------------------------------------------------------
+# Đăng nhập vào session "c2" bằng tài khoản g2
+.\mangahub.exe --session c2 auth login --username g2
+
+# Kiểm tra trạng thái của session "c2" (bạn sẽ thấy nó là g2, không bị đè lên g1)
+.\mangahub.exe --session c2 auth status
+
+# Tham gia kết nối cho "c2"
+.\mangahub.exe --session c2 notify subscribe
+----------------------------------------------------------------
 ```bash
 # Terminal 3
 .\mangahub.exe auth login --username Tien

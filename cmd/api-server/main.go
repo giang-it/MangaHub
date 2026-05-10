@@ -43,12 +43,30 @@ var (
 	apiURL        = "http://localhost:8080"
 	tokenFile     = ".mangahub_token"
 	globalChatHub *chatPkg.Hub
+	sessionName   string
 )
 
-func getToken() string {
+func getTokenPath() string {
 	home, _ := os.UserHomeDir()
-	path := home + "/" + tokenFile
-	b, err := os.ReadFile(path)
+	
+	// 1. Explicit CLI Flag
+	if sessionName != "" {
+		return home + "/" + tokenFile + "_" + sessionName
+	}
+	// 2. Environment Variable
+	if envPath := os.Getenv("MANGAHUB_TOKEN_FILE"); envPath != "" {
+		return envPath
+	}
+	// 3. Automatic detection for Windows Terminal tabs
+	if wtSession := os.Getenv("WT_SESSION"); wtSession != "" {
+		return home + "/" + tokenFile + "_" + wtSession
+	}
+	// 4. Default
+	return home + "/" + tokenFile
+}
+
+func getToken() string {
+	b, err := os.ReadFile(getTokenPath())
 	if err != nil {
 		return ""
 	}
@@ -56,15 +74,11 @@ func getToken() string {
 }
 
 func saveToken(token string) error {
-	home, _ := os.UserHomeDir()
-	path := home + "/" + tokenFile
-	return os.WriteFile(path, []byte(token), 0600)
+	return os.WriteFile(getTokenPath(), []byte(token), 0600)
 }
 
 func clearToken() error {
-	home, _ := os.UserHomeDir()
-	path := home + "/" + tokenFile
-	return os.Remove(path)
+	return os.Remove(getTokenPath())
 }
 
 func getCurrentUserID() string {
@@ -317,6 +331,7 @@ func main() {
 		Use:   "mangahub",
 		Short: "MangaHub Application (Server & CLI)",
 	}
+	rootCmd.PersistentFlags().StringVar(&sessionName, "session", "", "Session profile name for multiple clients (e.g. client1)")
 
 	var serverCmd = &cobra.Command{
 		Use:   "server",
