@@ -127,7 +127,7 @@ logging :
 
 ## Getting Started
 ### Quick Start Guide
-
+```
 # 1. Start the MangaHub server
 mangahub server start
 
@@ -145,6 +145,7 @@ mangahub library add --manga-id one-piece --status reading
 
 # 6. Update reading progress
 mangahub progress update --manga-id one-piece --chapter 1095
+```
 
 ### Command Structure
 
@@ -697,8 +698,6 @@ Monitoring real-time sync updates... (Press Ctrl+C to exit)
 resolved)
 
 ```
-
-
 Real-time sync monitoring active. Updates appear as they happen.
 
 ### UDP Notifications
@@ -726,22 +725,26 @@ mangahub grpc manga search --query <search-term>
 # Update progress via gRPC
 mangahub grpc progress update --manga-id <id> --chapter <number>
 ```
+
+----------------------------------------------------------------------------------
+----------------------------------------------------------------------------------
 ## Chat System
 ### Connect to Chat
 ```
 # Join general chat
-mangahub chat join
+mangahub --session c1 chat join
 
 # Join specific manga discussion
-mangahub chat join --manga-id <id>
+mangahub --session c1 chat join --manga-id <id>
 
 # Example
-mangahub chat join --manga-id one-piece
+mangahub --session c1 chat join --manga-id one-piece
 
 ```
 
 **Expected Output for** **`mangahub chat join`** **:**
-
+------------------------------------------------------------
+------
 ```
 Connecting to WebSocket chat server at ws://localhost:9093...
 
@@ -770,6 +773,8 @@ Type /help for commands or /quit to leave.
 johndoe>
 
 ```
+------
+------------------------------------------------------------
 
 **Expected Output for Chat Commands:**
 
@@ -778,12 +783,12 @@ johndoe> /help
 
 Chat Commands:
 /help      - Show this help
-/users     - List online users
+/users     - List online users ----------------------------------
 /quit      - Leave chat
 /pm <user> <msg>- Private message
-/manga <id>   - Switch to manga chat
-/history    - Show recent history
-/status     - Connection status
+/manga <id>   - Switch to manga chat ----------------------------------
+/history    - Show recent history ----------------------------------
+/status     - Connection status ----------------------------------
 
 johndoe> /users
 
@@ -842,6 +847,10 @@ mangahub chat history
 # View messages for specific manga
 mangahub chat history --manga-id one-piece --limit 50
 ```
+
+
+------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------
 ## Statistics and Analytics
 ### Reading Statistics
 ```

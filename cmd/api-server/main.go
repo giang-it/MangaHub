@@ -159,6 +159,69 @@ func runServer() {
 
 	r := gin.Default()
 
+	r.GET("/chat/users", func(c *gin.Context) {
+		if globalChatHub == nil {
+			c.JSON(http.StatusOK, []interface{}{})
+			return
+		}
+		globalChatHub.RLock()
+		defer globalChatHub.RUnlock()
+
+		var users []map[string]string
+		for room, clients := range globalChatHub.Rooms {
+			for client := range clients {
+				users = append(users, map[string]string{
+					"username": client.Username,
+					"room":     room,
+				})
+			}
+		}
+		c.JSON(http.StatusOK, users)
+	})
+
+	r.GET("/chat/history", func(c *gin.Context) {
+		room := c.Query("room")
+		if globalChatHub == nil {
+			c.JSON(http.StatusOK, []interface{}{})
+			return
+		}
+		globalChatHub.RLock()
+		defer globalChatHub.RUnlock()
+
+		history := globalChatHub.History[room]
+		if history == nil {
+			history = []chatPkg.ChatMessage{}
+		}
+		c.JSON(http.StatusOK, history)
+	})
+
+	r.POST("/chat/send", func(c *gin.Context) {
+		var req struct {
+			Username   string `json:"username"`
+			Room       string `json:"room"`
+			Message    string `json:"message"`
+			IsPrivate  bool   `json:"is_private"`
+			TargetUser string `json:"target_user"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+			return
+		}
+
+		if globalChatHub != nil {
+			msg := chatPkg.ChatMessage{
+				Username:   req.Username,
+				Message:    req.Message,
+				Room:       req.Room,
+				Timestamp:  time.Now().Unix(),
+				IsPrivate:  req.IsPrivate,
+				TargetUser: req.TargetUser,
+			}
+			globalChatHub.Broadcast <- msg
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "sent"})
+	})
+
 	mh := mangaHandler.NewHandler(db)
 	uh := userHandler.NewHandler(db)
 	uh.TCPChan = broadcastChan
@@ -1662,128 +1725,102 @@ func main() {
 				room = chatRoomID
 			}
 
-			fmt.Println("Connecting to WebSocket chat server at ws://localhost:9093...")
-
-			u := url.URL{Scheme: "ws", Host: "localhost:9093", Path: "/ws"}
-			q := u.Query()
-			q.Set("user_id", userID)
-			q.Set("username", username)
-			q.Set("room", room)
-			u.RawQuery = q.Encode()
-
-			// Dùng websocket của Gorilla để dial
-			c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
-			if err != nil {
-				log.Fatal("dial error:", err)
-			}
-			defer c.Close()
-
-			if room == "#general" {
-				fmt.Println("✓ Connected to General Chat")
-			} else {
-				fmt.Printf("✓ Connected to %s Discussion\n", room)
-			}
-			fmt.Printf("Chat Room: %s\nYour status: Online\n", room)
-			fmt.Println(strings.Repeat("─", 60))
-			fmt.Println("You are now in chat. Type your message and press Enter.")
-			fmt.Println("Type /help for commands or /quit to leave.")
-
-			// Goroutine để đọc tin nhắn từ server
-			go func() {
-				for {
-					_, message, err := c.ReadMessage()
-					if err != nil {
-						log.Println("\nDisconnected from server.")
-						return
-					}
-					var msg chatPkg.ChatMessage
-					if err := json.Unmarshal(message, &msg); err == nil {
-						timeStr := time.Unix(msg.Timestamp, 0).Format("15:04")
-
-						// Xử lý hiển thị UI cho từng loại tin nhắn
-						if msg.Username == "SYSTEM" {
-							fmt.Printf("\n[%s] *** %s ***\n", timeStr, msg.Message)
-						} else if msg.IsPrivate {
-							if msg.Username == username {
-								fmt.Printf("\n[%s] [Private to %s]: %s\n", timeStr, msg.TargetUser, msg.Message)
-							} else {
-								fmt.Printf("\n[%s] [Private from %s]: %s\n", timeStr, msg.Username, msg.Message)
-							}
-						} else {
-							fmt.Printf("\n[%s] %s: %s\n", timeStr, msg.Username, msg.Message)
-						}
-
-						fmt.Printf("%s> ", username) // Vẽ lại prompt
-					}
-				}
-			}()
-
-			// Vòng lặp chính để đọc input từ bàn phím
-			scanner := bufio.NewScanner(os.Stdin)
 			for {
-				fmt.Printf("%s> ", username)
-				if !scanner.Scan() {
+				nextRoom := runChatSession(room, userID, username)
+				if nextRoom == "" {
 					break
 				}
-				text := scanner.Text()
-				text = strings.TrimSpace(text)
-
-				if text == "" {
-					continue
-				}
-
-				if strings.HasPrefix(text, "/") {
-					parts := strings.SplitN(text, " ", 3)
-					command := parts[0]
-
-					switch command {
-					case "/quit":
-						fmt.Println("Leaving chat...")
-						// Dùng websocket của Gorilla để gửi CloseMessage
-						c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-						fmt.Println("✓ Disconnected from chat server")
-						return
-					case "/help":
-						fmt.Println("\nChat Commands:")
-						fmt.Println("/help      - Show this help")
-						fmt.Println("/quit      - Leave chat")
-						fmt.Println("/pm <user> <msg>- Private message")
-						continue
-					case "/pm":
-						if len(parts) < 3 {
-							fmt.Println("Usage: /pm <username> <message>")
-							continue
-						}
-						targetUser := parts[1]
-						pmText := parts[2]
-						msg := chatPkg.ChatMessage{ // <--- Đã sửa thành chatPkg
-							Message:    pmText,
-							IsPrivate:  true,
-							TargetUser: targetUser,
-						}
-						c.WriteJSON(msg)
-						continue
-					default:
-						fmt.Println("Unknown command. Type /help for a list of commands.")
-						continue
-					}
-				}
-
-				// Gửi tin nhắn bình thường
-				msg := chatPkg.ChatMessage{ // <--- Đã sửa thành chatPkg
-					Message: text,
-				}
-				err := c.WriteJSON(msg)
-				if err != nil {
-					log.Println("write error:", err)
-					return
-				}
+				room = nextRoom
 			}
 		},
 	}
 	chatJoinCmd.Flags().StringVar(&chatRoomID, "manga-id", "", "Join specific manga discussion")
 
-	chatCmd.AddCommand(chatJoinCmd)
+	var chatHistoryLimit int
+	var chatHistoryCmd = &cobra.Command{
+		Use:   "history",
+		Short: "View chat history",
+		Run: func(cmd *cobra.Command, args []string) {
+			room := "#general"
+			if chatRoomID != "" {
+				room = chatRoomID
+			}
+
+			hr, err := http.Get(apiURL + "/chat/history?room=" + url.QueryEscape(room))
+			if err != nil {
+				fmt.Println("✗ Error: Could not connect to server")
+				return
+			}
+			defer hr.Body.Close()
+
+			var h []chatPkg.ChatMessage
+			if err := json.NewDecoder(hr.Body).Decode(&h); err != nil {
+				fmt.Println("✗ Error parsing history")
+				return
+			}
+
+			if len(h) == 0 {
+				fmt.Println("No recent messages.")
+				return
+			}
+
+			if chatHistoryLimit > 0 && len(h) > chatHistoryLimit {
+				h = h[len(h)-chatHistoryLimit:]
+			}
+
+			fmt.Println("Recent messages:")
+			for _, m := range h {
+				ts := time.Unix(m.Timestamp, 0).Format("15:04")
+				if m.Username == "SYSTEM" {
+					fmt.Printf("[%s] *** %s ***\n", ts, m.Message)
+				} else if !m.IsPrivate {
+					fmt.Printf("[%s] %s: %s\n", ts, m.Username, m.Message)
+				}
+			}
+		},
+	}
+	chatHistoryCmd.Flags().StringVar(&chatRoomID, "manga-id", "", "View history for specific manga discussion")
+	chatHistoryCmd.Flags().IntVar(&chatHistoryLimit, "limit", 0, "Limit number of messages")
+
+	var chatSendCmd = &cobra.Command{
+		Use:   "send [message]",
+		Short: "Send a message to chat",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			token := getToken()
+			if token == "" {
+				fmt.Println("Not logged in. Please login first.")
+				return
+			}
+			userID := getCurrentUserID()
+			username := getUsernameFromDB(userID)
+			if username == "" {
+				username = "User_" + userID[:5]
+			}
+
+			room := "#general"
+			if chatRoomID != "" {
+				room = chatRoomID
+			}
+
+			msg := args[0]
+			reqBody, _ := json.Marshal(map[string]interface{}{
+				"username": username,
+				"room":     room,
+				"message":  msg,
+			})
+
+			resp, err := http.Post(apiURL+"/chat/send", "application/json", bytes.NewBuffer(reqBody))
+			if err != nil || resp.StatusCode != http.StatusOK {
+				fmt.Println("✗ Error: Could not send message")
+				return
+			}
+			fmt.Println("✓ Message sent successfully")
+		},
+	}
+	chatSendCmd.Flags().StringVar(&chatRoomID, "manga-id", "", "Send message to specific manga discussion")
+
+	chatCmd.AddCommand(chatJoinCmd, chatHistoryCmd, chatSendCmd)
 	rootCmd.AddCommand(serverCmd)
 	rootCmd.AddCommand(authCmd)
 	rootCmd.AddCommand(mangaCmd)
@@ -1802,6 +1839,202 @@ func main() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
+	}
+}
+
+func formatRoomName(room string) string {
+	if room == "#general" {
+		return "General Chat"
+	}
+	words := strings.Split(room, "-")
+	for i, w := range words {
+		if len(w) > 0 {
+			words[i] = strings.ToUpper(w[:1]) + w[1:]
+		}
+	}
+	return strings.Join(words, " ") + " Discussion"
+}
+
+func runChatSession(room, userID, username string) string {
+	fmt.Println("Connecting to WebSocket chat server at ws://localhost:9093...")
+
+	u := url.URL{Scheme: "ws", Host: "localhost:9093", Path: "/ws"}
+	q := u.Query()
+	q.Set("user_id", userID)
+	q.Set("username", username)
+	q.Set("room", room)
+	u.RawQuery = q.Encode()
+
+	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	if err != nil {
+		log.Fatal("dial error:", err)
+	}
+	defer c.Close()
+
+	userCount := 1
+	resp, err := http.Get(apiURL + "/chat/users")
+	if err == nil {
+		var users []map[string]string
+		json.NewDecoder(resp.Body).Decode(&users)
+		resp.Body.Close()
+		userCount = len(users)
+		if userCount == 0 {
+			userCount = 1
+		}
+	}
+
+	if room == "#general" {
+		fmt.Println("✓ Connected to General Chat")
+	} else {
+		fmt.Printf("✓ Connected to %s\n", formatRoomName(room))
+	}
+	fmt.Printf("\nChat Room: %s\nConnected users: %d\nYour status: Online\n\n", room, userCount)
+
+	histResp, err := http.Get(apiURL + "/chat/history?room=" + url.QueryEscape(room))
+	if err == nil {
+		var hist []chatPkg.ChatMessage
+		json.NewDecoder(histResp.Body).Decode(&hist)
+		histResp.Body.Close()
+		if len(hist) > 0 {
+			fmt.Println("Recent messages:")
+			for _, msg := range hist {
+				timeStr := time.Unix(msg.Timestamp, 0).Format("15:04")
+				if msg.Username == "SYSTEM" {
+					fmt.Printf("[%s] *** %s ***\n", timeStr, msg.Message)
+				} else if !msg.IsPrivate {
+					fmt.Printf("[%s] %s: %s\n", timeStr, msg.Username, msg.Message)
+				}
+			}
+		}
+	}
+
+	fmt.Println(strings.Repeat("─", 60))
+	fmt.Println("You are now in chat. Type your message and press Enter.")
+	fmt.Println("Type /help for commands or /quit to leave.")
+	fmt.Println()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			_, message, err := c.ReadMessage()
+			if err != nil {
+				return
+			}
+			var msg chatPkg.ChatMessage
+			if err := json.Unmarshal(message, &msg); err == nil {
+				timeStr := time.Unix(msg.Timestamp, 0).Format("15:04")
+				fmt.Print("\r\033[K")
+				if msg.Username == "SYSTEM" {
+					fmt.Printf("[%s] *** %s ***\n", timeStr, msg.Message)
+				} else if msg.IsPrivate {
+					if msg.Username == username {
+						fmt.Printf("[%s] [Private to %s]: %s\n", timeStr, msg.TargetUser, msg.Message)
+					} else {
+						fmt.Printf("[%s] [Private from %s]: %s\n", timeStr, msg.Username, msg.Message)
+					}
+				} else {
+					fmt.Printf("[%s] %s: %s\n", timeStr, msg.Username, msg.Message)
+				}
+				fmt.Printf("%s> ", username)
+			}
+		}
+	}()
+
+	scanner := bufio.NewScanner(os.Stdin)
+	for {
+		fmt.Printf("%s> ", username)
+		if !scanner.Scan() {
+			return ""
+		}
+		text := strings.TrimSpace(scanner.Text())
+		if text == "" {
+			continue
+		}
+
+		if strings.HasPrefix(text, "/") {
+			parts := strings.SplitN(text, " ", 3)
+			command := parts[0]
+
+			switch command {
+			case "/quit":
+				fmt.Println("Leaving chat...")
+				c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+				fmt.Println("✓ Disconnected from chat server")
+				return ""
+			case "/help":
+				fmt.Println("\nChat Commands:")
+				fmt.Println("/help      - Show this help")
+				fmt.Println("/users     - List online users")
+				fmt.Println("/quit      - Leave chat")
+				fmt.Println("/pm <user> <msg>- Private message")
+				fmt.Println("/manga <id>   - Switch to manga chat")
+				fmt.Println("/history    - Show recent history")
+				fmt.Println("/status     - Connection status\n")
+				continue
+			case "/pm":
+				if len(parts) < 3 {
+					fmt.Println("Usage: /pm <username> <message>")
+					continue
+				}
+				msg := chatPkg.ChatMessage{
+					Message:    parts[2],
+					IsPrivate:  true,
+					TargetUser: parts[1],
+				}
+				c.WriteJSON(msg)
+				continue
+			case "/users":
+				r, err := http.Get(apiURL + "/chat/users")
+				if err == nil {
+					var usrs []map[string]string
+					json.NewDecoder(r.Body).Decode(&usrs)
+					r.Body.Close()
+					fmt.Printf("\nOnline Users (%d):\n", len(usrs))
+					for _, u := range usrs {
+						fmt.Printf("● %s (%s)\n", u["username"], formatRoomName(u["room"]))
+					}
+					fmt.Println()
+				}
+				continue
+			case "/manga":
+				if len(parts) < 2 {
+					fmt.Println("Usage: /manga <id>")
+					continue
+				}
+				c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+				return parts[1]
+			case "/history":
+				hr, err := http.Get(apiURL + "/chat/history?room=" + url.QueryEscape(room))
+				if err == nil {
+					var h []chatPkg.ChatMessage
+					json.NewDecoder(hr.Body).Decode(&h)
+					hr.Body.Close()
+					fmt.Println("\nRecent messages:")
+					for _, m := range h {
+						ts := time.Unix(m.Timestamp, 0).Format("15:04")
+						if m.Username == "SYSTEM" {
+							fmt.Printf("[%s] *** %s ***\n", ts, m.Message)
+						} else if !m.IsPrivate {
+							fmt.Printf("[%s] %s: %s\n", ts, m.Username, m.Message)
+						}
+					}
+					fmt.Println()
+				}
+				continue
+			case "/status":
+				fmt.Printf("\nConnection Status: Connected\nRoom: %s\nServer: ws://localhost:9093/ws\n\n", room)
+				continue
+			default:
+				fmt.Println("Unknown command. Type /help for a list of commands.")
+				continue
+			}
+		}
+
+		msg := chatPkg.ChatMessage{Message: text}
+		if err := c.WriteJSON(msg); err != nil {
+			return ""
+		}
 	}
 }
 
