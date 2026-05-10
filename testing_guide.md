@@ -599,3 +599,86 @@ Expected: Status shows `✗ Not subscribed`.
 | Direct UDP registration | PowerShell UDP test | JSON response with status |
 | Broadcast trigger | PowerShell broadcast packet | broadcast_triggered ack |
 
+---
+
+# MangaHub Phase 4 - Testing & Execution Guide (gRPC Services)
+
+## Overview
+The gRPC Service provides high-performance internal communication for manga queries, searches, and reading progress updates on port **9092**.
+
+## Step 0: Start the Server
+
+```bash
+# Terminal 1
+.\mangahub.exe server start
+```
+
+Expected output should include:
+```
+gRPC Internal Service listening on grpc://localhost:9092
+```
+
+---
+
+## Step 1: Query Manga via gRPC (Get Manga)
+
+```bash
+# Terminal 2
+.\mangahub.exe grpc manga get --id "one-piece"
+```
+
+Expected output:
+```
+✓ [gRPC] Found: One Piece - Oda Eiichiro
+```
+
+---
+
+## Step 2: Search Manga via gRPC
+
+```bash
+# Terminal 2
+.\mangahub.exe grpc manga search --query "piece"
+```
+
+Expected output:
+```
+✓ [gRPC] Search Results for 'piece':
+  - one-piece: One Piece (Oda Eiichiro)
+```
+
+---
+
+## Step 3: Update Progress via gRPC
+
+To update progress via gRPC, you must be logged in so the server can authorize the update and broadcast it to the TCP sync server.
+
+### 3.1 Login
+```bash
+# Terminal 2
+.\mangahub.exe auth login --username testuser
+```
+
+### 3.2 Update Progress
+```bash
+.\mangahub.exe grpc progress update --manga-id "one-piece" --chapter 505
+```
+
+Expected output:
+```
+✓ [gRPC] Updated successfully via gRPC
+```
+
+*(Note: If you have a TCP Sync monitor running in another terminal, you will instantly see the broadcasted update there as well!)*
+
+---
+
+## Phase 4 Checklist
+
+| Feature | Command | Expected |
+|---------|---------|----------|
+| Server start (gRPC) | `server start` | gRPC listening on :9092 |
+| Get manga by ID | `grpc manga get --id one-piece` | ✓ [gRPC] Found: One Piece |
+| Search manga | `grpc manga search --query "piece"` | ✓ [gRPC] Search Results |
+| Auth Login | `auth login --username testuser` | Login successful |
+| Update progress | `grpc progress update --manga-id one-piece --chapter 505` | ✓ [gRPC] Updated successfully via gRPC |

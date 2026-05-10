@@ -45,6 +45,31 @@ func (s *MangaServer) GetManga(ctx context.Context, req *pb.GetMangaRequest) (*p
 	return &m, nil
 }
 
+func (s *MangaServer) SearchManga(ctx context.Context, req *pb.SearchRequest) (*pb.SearchResponse, error) {
+	queryPattern := "%" + req.Query + "%"
+	rows, err := s.DB.Query("SELECT id, title, author, status, total_chapters, description FROM manga WHERE title LIKE ? OR author LIKE ?", queryPattern, queryPattern)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []*pb.MangaResponse
+	for rows.Next() {
+		var m pb.MangaResponse
+		err := rows.Scan(&m.Id, &m.Title, &m.Author, &m.Status, &m.TotalChapters, &m.Description)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, &m)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return &pb.SearchResponse{Results: results}, nil
+}
+
 func (s *MangaServer) UpdateProgress(ctx context.Context, req *pb.ProgressRequest) (*pb.ProgressResponse, error) {
 	query := `UPDATE user_progress SET current_chapter = ?, current_volume = ?, updated_at = ? WHERE user_id = ? AND manga_id = ?`
 	_, err := s.DB.Exec(query, req.Chapter, req.Volume, time.Now().UTC(), req.UserId, req.MangaId)
