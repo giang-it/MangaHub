@@ -682,3 +682,46 @@ Expected output:
 | Search manga | `grpc manga search --query "piece"` | ✓ [gRPC] Search Results |
 | Auth Login | `auth login --username testuser` | Login successful |
 | Update progress | `grpc progress update --manga-id one-piece --chapter 505` | ✓ [gRPC] Updated successfully via gRPC |
+
+
+## Chat System
+### Connect to Chat
+  ```
+  # Join general chat
+  .\mangahub.exe --session c1 chat join
+
+  # Join specific manga discussion
+  .\mangahub.exe --session c1 chat join --manga-id <id>
+
+  # Example
+  .\mangahub.exe --session c1 chat join --manga-id one-piece
+  ```
+  Chat Commands:
+  /help      - Show this help
+  /users     - List online users 
+  /quit      - Leave chat
+  /pm <user> <msg>- Private message
+  /manga <id>   - Switch to manga chat 
+  /history    - Show recent history 
+  /status     - Connection status 
+  
+
+  ### Send Messages
+
+  ```
+  # Send message to current chat
+  .\mangahub.exe --session c1 chat send "Hello everyone!"
+
+  # Send message to specific manga chat
+  .\mangahub.exe --session c1 chat send "Great chapter!" --manga-id naruto
+  ```
+
+  ### View Chat History
+
+  ```
+  # View recent messages
+  .\mangahub.exe chat history
+
+  # View messages for specific manga
+  .\mangahub.exe chat history --manga-id naruto --limit 50
+  ```
