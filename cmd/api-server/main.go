@@ -48,7 +48,7 @@ var (
 
 func getTokenPath() string {
 	home, _ := os.UserHomeDir()
-	
+
 	// 1. Explicit CLI Flag
 	if sessionName != "" {
 		return home + "/" + tokenFile + "_" + sessionName
@@ -180,7 +180,7 @@ func runServer() {
 	})
 
 	r.GET("/chat/history", func(c *gin.Context) {
-		room := c.Query("room")
+		room := c.Query("room") // Lấy tên phòng từ URL
 		if globalChatHub == nil {
 			c.JSON(http.StatusOK, []interface{}{})
 			return
@@ -188,11 +188,12 @@ func runServer() {
 		globalChatHub.RLock()
 		defer globalChatHub.RUnlock()
 
+		// Bước 4: Lấy dữ liệu từ map History trong RAM
 		history := globalChatHub.History[room]
 		if history == nil {
 			history = []chatPkg.ChatMessage{}
 		}
-		c.JSON(http.StatusOK, history)
+		c.JSON(http.StatusOK, history) // Trả về JSON cho Client
 	})
 
 	r.POST("/chat/send", func(c *gin.Context) {
@@ -438,7 +439,6 @@ func main() {
 				fmt.Println("✓ TCP Sync:        Online  (localhost:8081)")
 			}
 
-			// --- UDP Notifications ---
 			udpAddr, _ := net.ResolveUDPAddr("udp", "localhost:9091")
 			udpProbe, udpErr := net.DialUDP("udp", nil, udpAddr)
 			if udpErr != nil {
@@ -1454,6 +1454,7 @@ func main() {
 				return
 			}
 
+			// Trong lệnh notifySubscribeCmd
 			serverAddr := "localhost:9091"
 			udpAddr, err := net.ResolveUDPAddr("udp", serverAddr)
 			if err != nil {
@@ -1779,6 +1780,8 @@ func main() {
 	grpcCmd.AddCommand(grpcMangaCmd)
 	grpcCmd.AddCommand(grpcProgressCmd)
 	rootCmd.AddCommand(grpcCmd)
+
+	///////websocket
 	var chatRoomID string
 	var chatJoinCmd = &cobra.Command{
 		Use:   "join",
@@ -2019,9 +2022,11 @@ func runChatSession(room, userID, username string) string {
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
 		fmt.Printf("%s> ", username)
+		// Chờ người dùng gõ
 		if !scanner.Scan() {
 			return ""
 		}
+		// Đọc từ bàn phím
 		text := strings.TrimSpace(scanner.Text())
 		if text == "" {
 			continue
@@ -2037,6 +2042,7 @@ func runChatSession(room, userID, username string) string {
 				c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 				fmt.Println("✓ Disconnected from chat server")
 				return ""
+
 			case "/help":
 				fmt.Println("\nChat Commands:")
 				fmt.Println("/help      - Show this help")
@@ -2047,6 +2053,7 @@ func runChatSession(room, userID, username string) string {
 				fmt.Println("/history    - Show recent history")
 				fmt.Println("/status     - Connection status\n")
 				continue
+
 			case "/pm":
 				if len(parts) < 3 {
 					fmt.Println("Usage: /pm <username> <message>")
@@ -2059,6 +2066,7 @@ func runChatSession(room, userID, username string) string {
 				}
 				c.WriteJSON(msg)
 				continue
+
 			case "/users":
 				r, err := http.Get(apiURL + "/chat/users")
 				if err == nil {
@@ -2072,6 +2080,7 @@ func runChatSession(room, userID, username string) string {
 					fmt.Println()
 				}
 				continue
+
 			case "/manga":
 				if len(parts) < 2 {
 					fmt.Println("Usage: /manga <id>")
@@ -2079,6 +2088,7 @@ func runChatSession(room, userID, username string) string {
 				}
 				c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 				return parts[1]
+
 			case "/history":
 				hr, err := http.Get(apiURL + "/chat/history?room=" + url.QueryEscape(room))
 				if err == nil {
@@ -2097,6 +2107,7 @@ func runChatSession(room, userID, username string) string {
 					fmt.Println()
 				}
 				continue
+
 			case "/status":
 				fmt.Printf("\nConnection Status: Connected\nRoom: %s\nServer: ws://localhost:9093/ws\n\n", room)
 				continue
@@ -2105,7 +2116,7 @@ func runChatSession(room, userID, username string) string {
 				continue
 			}
 		}
-
+		// Nếu là tin nhắn bình thường
 		msg := chatPkg.ChatMessage{Message: text}
 		if err := c.WriteJSON(msg); err != nil {
 			return ""

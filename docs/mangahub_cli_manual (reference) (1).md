@@ -730,123 +730,123 @@ mangahub grpc progress update --manga-id <id> --chapter <number>
 ----------------------------------------------------------------------------------
 ## Chat System
 ### Connect to Chat
-```
-# Join general chat
-mangahub --session c1 chat join
+  ```
+  # Join general chat
+  mangahub --session c1 chat join
 
-# Join specific manga discussion
-mangahub --session c1 chat join --manga-id <id>
+  # Join specific manga discussion
+  mangahub --session c1 chat join --manga-id <id>
 
-# Example
-mangahub --session c1 chat join --manga-id one-piece
+  # Example
+  mangahub --session c1 chat join --manga-id one-piece
 
-```
+  ```
 
-**Expected Output for** **`mangahub chat join`** **:**
-------------------------------------------------------------
-------
-```
-Connecting to WebSocket chat server at ws://localhost:9093...
+  **Expected Output for** **`mangahub chat join`** **:**
+  ------------------------------------------------------------
+  ------
+  ```
+  Connecting to WebSocket chat server at ws://localhost:9093...
 
-```
+  ```
 
-✓ `Connected to General Chat`
+  ✓ `Connected to General Chat`
 
-```
-Chat Room: #general
-Connected users: 12
-Your status: Online
+  ```
+  Chat Room: #general
+  Connected users: 12
+  Your status: Online
 
-```
+  ```
 
-```
-Recent messages:
-[16:45] alice: Just finished reading the latest chapter!
-[16:47] bob: Which manga are you reading?
-[16:48] alice: Attack on Titan, it's getting intense
-[16:50] charlie: No spoilers please!
+  ```
+  Recent messages:
+  [16:45] alice: Just finished reading the latest chapter!
+  [16:47] bob: Which manga are you reading?
+  [16:48] alice: Attack on Titan, it's getting intense
+  [16:50] charlie: No spoilers please!
 
-─────────────────────────────────────────────────────────────
-You are now in chat. Type your message and press Enter.
-Type /help for commands or /quit to leave.
+  ─────────────────────────────────────────────────────────────
+  You are now in chat. Type your message and press Enter.
+  Type /help for commands or /quit to leave.
 
-johndoe>
+  johndoe>
 
-```
-------
-------------------------------------------------------------
+  ```
+  ------
+  ------------------------------------------------------------
 
-**Expected Output for Chat Commands:**
+  **Expected Output for Chat Commands:**
 
-```
-johndoe> /help
+  ```
+  johndoe> /help
 
-Chat Commands:
-/help      - Show this help
-/users     - List online users ----------------------------------
-/quit      - Leave chat
-/pm <user> <msg>- Private message
-/manga <id>   - Switch to manga chat ----------------------------------
-/history    - Show recent history ----------------------------------
-/status     - Connection status ----------------------------------
+  Chat Commands:
+  /help      - Show this help
+  /users     - List online users 
+  /quit      - Leave chat
+  /pm <user> <msg>- Private message
+  /manga <id>   - Switch to manga chat 
+  /history    - Show recent history 
+  /status     - Connection status 
 
-johndoe> /users
+  johndoe> /users
 
-Online Users (12):
-● alice (General Chat)
-● bob (General Chat)
-● charlie (General Chat)
-● diana (One Piece Discussion)
-● elena (Attack on Titan Discussion)
-● frank (General Chat)
-[... 6 more users]
+  Online Users (12):
+  ● alice (General Chat)
+  ● bob (General Chat)
+  ● charlie (General Chat)
+  ● diana (One Piece Discussion)
+  ● elena (Attack on Titan Discussion)
+  ● frank (General Chat)
+  [... 6 more users]
 
-johndoe> Hello everyone!
-[17:02] johndoe: Hello everyone!
-[17:02] alice: Hey johndoe! Welcome to the chat
-[17:03] bob: Hi there! What are you reading these days?
+  johndoe> Hello everyone!
+  [17:02] johndoe: Hello everyone!
+  [17:02] alice: Hey johndoe! Welcome to the chat
+  [17:03] bob: Hi there! What are you reading these days?
 
-johndoe> /quit
-Leaving chat...
+  johndoe> /quit
+  Leaving chat...
 
-✓ `Disconnected from chat server`
-```
+  ✓ `Disconnected from chat server`
+  ```
 
-### Send Messages
+  ### Send Messages
 
-```
-# Send message to current chat
-mangahub chat send "Hello everyone!"
+  ```
+  # Send message to current chat
+  mangahub chat send "Hello everyone!"
 
-# Send message to specific manga chat
-mangahub chat send "Great chapter!" --manga-id one-piece
-```
-### Chat Commands (Interactive Mode)
-
-
-When in chat mode, use these commands: - `/help` - Show chat commands
+  # Send message to specific manga chat
+  mangahub chat send "Great chapter!" --manga-id one-piece
+  ```
+  ### Chat Commands (Interactive Mode)
 
 
-  - `/users`  - List online users
+  When in chat mode, use these commands: - `/help` - Show chat commands
 
 
-  - `/quit`  - Leave chat
+    - `/users`  - List online users
 
 
-  - `/pm <username> <message>`  - Private message
+    - `/quit`  - Leave chat
 
 
-  - `/manga <id>`  - Switch to manga-specific chat
+    - `/pm <username> <message>`  - Private message
 
-### View Chat History
 
-```
-# View recent messages
-mangahub chat history
+    - `/manga <id>`  - Switch to manga-specific chat
 
-# View messages for specific manga
-mangahub chat history --manga-id one-piece --limit 50
-```
+  ### View Chat History
+
+  ```
+  # View recent messages
+  mangahub chat history
+
+  # View messages for specific manga
+  mangahub chat history --manga-id one-piece --limit 50
+  ```
 
 
 ------------------------------------------------------------------------------------

@@ -681,6 +681,8 @@ architecture overview
 with Q&A
 
 ### Completed one or more random Bonus features to full fill 10 points
+
+
 ## Bonus Features (Extra Credit)
 ### Advanced Protocol Features (5-10 points)
 
@@ -974,17 +976,9 @@ implementation must be their own.
 
 
 
-`o` Submitting AI-generated code, documentation, or reports **without**
+`o` Submitting AI-generated code, documentation, or reports **without meaningful modification** is strictly prohibited.
 
-
-
-**meaningful modification** is strictly prohibited.
-
-`o` Using AI to solve entire project tasks or bypass the learning objectives will be
-
-
-
-treated as **academic misconduct** .
+`o` Using AI to solve entire project tasks or bypass the learning objectives will be treated as **academic misconduct** .
 3. **Transparency**
 
 

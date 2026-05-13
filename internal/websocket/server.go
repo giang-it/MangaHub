@@ -53,6 +53,7 @@ func (s *ChatServer) serveWs(w http.ResponseWriter, r *http.Request) {
 		room = "#general"
 	}
 
+	// upgrade from http to websocket connection
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println(err)

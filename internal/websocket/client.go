@@ -47,6 +47,7 @@ func (c *Client) ReadPump() {
 			chatMsg.Username = c.Username
 			chatMsg.Room = c.Room
 			chatMsg.Timestamp = time.Now().Unix()
+			// Đẩy vào channel Broadcast của Hub để xử lý chung
 			c.Hub.Broadcast <- chatMsg
 		}
 	}

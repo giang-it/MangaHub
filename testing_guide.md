@@ -70,7 +70,7 @@ Kết quả mong đợi: `Server is running on port 8080...` và hiển thị 15
 
 ### 2.3 Kiểm tra trạng thái
 ```bash
-.\mangahub.exe auth status
+.\mangahub.exe --session c1 auth status
 ```
 
 ---

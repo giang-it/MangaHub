@@ -70,13 +70,18 @@ func (h *Hub) Run() {
 			h.RLock()
 			if message.IsPrivate {
 				var target, sender *Client
-				if t, ok := h.Clients[message.TargetUser]; ok { target = t }
-				if s, ok := h.Clients[message.Username]; ok { sender = s }
+				if t, ok := h.Clients[message.TargetUser]; ok {
+					target = t
+				}
+				if s, ok := h.Clients[message.Username]; ok {
+					sender = s
+				}
 				h.RUnlock()
-				
+
 				if target != nil {
 					h.sendToClient(target, message)
 				}
+				// Gửi lại cho người gửi để hiện lên màn hình
 				if sender != nil && message.Username != message.TargetUser {
 					h.sendToClient(sender, message)
 				}
@@ -89,6 +94,7 @@ func (h *Hub) Run() {
 			if len(h.History[message.Room]) >= 50 {
 				h.History[message.Room] = h.History[message.Room][1:]
 			}
+			// Thêm tin mới
 			h.History[message.Room] = append(h.History[message.Room], message)
 			roomClients := make([]*Client, 0, len(h.Rooms[message.Room]))
 			for client := range h.Rooms[message.Room] {

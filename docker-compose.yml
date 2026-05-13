@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  mangahub:
+    build: .
+    container_name: mangahub-server
+    restart: always
+    ports:
+      - "8080:8080"      # HTTP API
+      - "8081:8081"      # TCP Sync
+      - "9091:9091/udp"  # UDP Notification
+      - "9092:9092"      # gRPC
+      - "9093:9093"      # WebSocket
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config.yaml:/app/config.yaml
+    environment:
+      - GIN_MODE=release
+    networks:
+      - mangahub-network
+
+networks:
+  mangahub-network:
+    driver: bridge

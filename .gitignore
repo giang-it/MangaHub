@@ -1,0 +1,32 @@
+# Binaries
+bin/
+*.exe
+mangahub
+main
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Database & State (Quan trọng: Không nên đẩy DB cá nhân lên Git)
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/sync_state.json
+data/notify_state.json
+
+# Logs
+logs/
+*.log
+
+# Authentication (Bảo mật: Không đẩy token của bạn lên)
+.mangahub_token*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+.dockerignore
