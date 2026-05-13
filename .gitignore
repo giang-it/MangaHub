@@ -23,6 +23,14 @@ logs/
 
 # Authentication (Bảo mật: Không đẩy token của bạn lên)
 .mangahub_token*
+token_*.json
+session_*.json
+auth_token.json
+
+# Data
+data/
+!data/manga_seed.json
+!data/.gitkeep
 
 # OS
 .DS_Store
